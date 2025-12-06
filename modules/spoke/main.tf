@@ -181,6 +181,14 @@ resource "aws_security_group" "cluster" {
     cidr_blocks = [var.hub_vpc_cidr]
   }
 
+  # K3s API access from hub VPC (for bastion kubectl access)
+  ingress {
+    from_port   = 6443
+    to_port     = 6443
+    protocol    = "tcp"
+    cidr_blocks = [var.hub_vpc_cidr]
+  }
+
   # All traffic within VPC
   ingress {
     from_port   = 0
@@ -205,7 +213,7 @@ resource "aws_security_group" "cluster" {
 resource "aws_instance" "k3s_masters" {
   count                  = var.master_count
   ami                    = data.aws_ssm_parameter.ami.value
-  instance_type          = var.instance_type
+  instance_type          = var.master_instance_type
   key_name               = aws_key_pair.main.key_name
   vpc_security_group_ids = [aws_security_group.cluster.id]
   subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
@@ -221,7 +229,7 @@ resource "aws_instance" "k3s_masters" {
 resource "aws_instance" "k3s_workers" {
   count                  = var.worker_count
   ami                    = data.aws_ssm_parameter.ami.value
-  instance_type          = var.instance_type
+  instance_type          = var.worker_instance_type
   key_name               = aws_key_pair.main.key_name
   vpc_security_group_ids = [aws_security_group.cluster.id]
   subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
@@ -237,7 +245,7 @@ resource "aws_instance" "k3s_workers" {
 resource "aws_instance" "databases" {
   count                  = var.db_count
   ami                    = data.aws_ssm_parameter.ami.value
-  instance_type          = var.instance_type
+  instance_type          = var.db_instance_type
   key_name               = aws_key_pair.main.key_name
   vpc_security_group_ids = [aws_security_group.cluster.id]
   subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
@@ -319,6 +327,35 @@ resource "aws_lb_target_group_attachment" "k3s_masters" {
   target_group_arn = aws_lb_target_group.k3s_api.arn
   target_id        = aws_instance.k3s_masters[count.index].id
   port             = 6443
+}
+
+# Export spoke environment variables to GitHub (environment created by hub)
+resource "github_actions_environment_variable" "spoke_env" {
+  repository      = split("/", var.github_repo)[1]
+  environment     = var.deployment_environment
+  variable_name   = "SPOKE_ENV"
+  value           = var.env
+}
+
+resource "github_actions_environment_variable" "vpc_cidr" {
+  repository      = split("/", var.github_repo)[1]
+  environment     = var.deployment_environment
+  variable_name   = "VPC_CIDR"
+  value           = var.vpc_cidr
+}
+
+resource "github_actions_environment_variable" "master_count" {
+  repository      = split("/", var.github_repo)[1]
+  environment     = var.deployment_environment
+  variable_name   = "MASTER_COUNT"
+  value           = tostring(var.master_count)
+}
+
+resource "github_actions_environment_variable" "worker_count" {
+  repository      = split("/", var.github_repo)[1]
+  environment     = var.deployment_environment
+  variable_name   = "WORKER_COUNT"
+  value           = tostring(var.worker_count)
 }
 
 # Resource Group

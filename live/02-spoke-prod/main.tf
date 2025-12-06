@@ -1,7 +1,3 @@
-provider "aws" {
-  region = var.aws_region
-}
-
 module "spoke" {
   source = "../../modules/spoke"
 
@@ -18,8 +14,12 @@ module "spoke" {
   worker_count               = var.worker_count
   db_count                   = var.db_count
   db_vol_size                = var.db_vol_size
-  instance_type              = var.instance_type
+  master_instance_type       = var.master_instance_type
+  worker_instance_type       = var.worker_instance_type
+  db_instance_type           = var.db_instance_type
   public_key_path            = var.public_key_path
   ssm_parameter_name         = var.ssm_parameter_name
+  github_repo                = var.github_repo
+  deployment_environment     = var.deployment_environment
   enable_deletion_protection = var.enable_deletion_protection
 }

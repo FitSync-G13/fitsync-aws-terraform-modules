@@ -67,12 +67,41 @@ variable "db_vol_size" {
   type        = number
 }
 
-variable "instance_type" {
-  description = "EC2 instance type"
+variable "master_instance_type" {
+  description = "Instance type for K3s master nodes"
   type        = string
+  default     = "t3.micro"
+}
+
+variable "worker_instance_type" {
+  description = "Instance type for K3s worker nodes"
+  type        = string
+  default     = "t3.micro"
+}
+
+variable "db_instance_type" {
+  description = "Instance type for database nodes"
+  type        = string
+  default     = "t3.micro"
 }
 
 variable "public_key_path" {
   description = "Path to the public key file"
+  type        = string
+}
+
+variable "github_repo" {
+  description = "GitHub repository for OIDC (format: owner/repo-name)"
+  type        = string
+}
+
+variable "github_token" {
+  description = "GitHub personal access token for managing secrets"
+  type        = string
+  sensitive   = true
+}
+
+variable "deployment_environment" {
+  description = "Deployment environment name (production, staging, development)"
   type        = string
 }

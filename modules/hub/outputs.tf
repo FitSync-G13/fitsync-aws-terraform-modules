@@ -17,3 +17,13 @@ output "bastion_public_ip" {
   description = "Public IP of the bastion host"
   value       = var.enable_deletion_protection ? aws_instance.bastion_protected[0].public_ip : aws_instance.bastion[0].public_ip
 }
+
+output "github_actions_role_arn" {
+  description = "ARN of the GitHub Actions IAM role"
+  value       = aws_iam_role.github_actions.arn
+}
+
+output "github_actions_role_name" {
+  description = "Name of the GitHub Actions IAM role"
+  value       = aws_iam_role.github_actions.name
+}

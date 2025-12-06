@@ -4,4 +4,6 @@ env                        = "prod-hub"
 vpc_cidr                   = "10.0.0.0/16"
 admin_cidr                 = "0.0.0.0/0"
 public_key_path            = "../../ssh-keys/aws-key.pub"
+github_repo                = "FitSync-G13/fitsync-cd"
+deployment_environment     = "production"
 enable_deletion_protection = false
