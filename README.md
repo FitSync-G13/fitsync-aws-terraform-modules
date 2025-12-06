@@ -1,4 +1,4 @@
-# AWS Hub-Spoke Infrastructure Architecture
+# FitSync Hub-Spoke Infrastructure Architecture
 
 ## Table of Contents
 1. [Architecture Overview](#architecture-overview)
@@ -7,14 +7,15 @@
 4. [Security Model](#security-model)
 5. [Traffic Flow](#traffic-flow)
 6. [Deployment Guide](#deployment-guide)
-7. [Operations Guide](#operations-guide)
-8. [Troubleshooting](#troubleshooting)
+7. [Configuration Guide](#configuration-guide)
+8. [Operations Guide](#operations-guide)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Architecture Overview
 
-This infrastructure implements a **Hub-and-Spoke network topology** on AWS, designed for self-managed container orchestration using K3s (lightweight Kubernetes). The architecture follows a strict separation of concerns with three distinct layers:
+This infrastructure implements a **Hub-and-Spoke network topology** on AWS for the **FitSync** project, designed for self-managed container orchestration using K3s (lightweight Kubernetes). The architecture follows a strict separation of concerns with three distinct layers:
 
 ### Design Principles
 - **No Vendor Lock-in**: Avoid managed services (EKS/ECS/RDS)
@@ -22,6 +23,7 @@ This infrastructure implements a **Hub-and-Spoke network topology** on AWS, desi
 - **Security First**: Private subnets, VPC endpoints, centralized routing
 - **Scalable**: Easy to add new spokes without hub modifications
 - **Cost Effective**: Shared infrastructure reduces redundancy
+- **Project-Based**: Consistent naming with `fitsync` prefix for multi-project support
 
 ### Three-Layer Architecture
 
@@ -29,8 +31,8 @@ This infrastructure implements a **Hub-and-Spoke network topology** on AWS, desi
 ┌─────────────────────────────────────────────────────────────────┐
 │                    SHARED SERVICES LAYER                        │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │                 ECR Repository                          │   │
-│  │           (Docker Image Registry)                       │   │
+│  │              FitSync ECR Repository                     │   │
+│  │           (fitsync-ecr)                                 │   │
 │  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -70,19 +72,49 @@ This infrastructure implements a **Hub-and-Spoke network topology** on AWS, desi
 
 #### Hub VPC (10.0.0.0/16)
 ```
-Public Subnets:
+Public Subnets (Auto-generated):
 ├── 10.0.1.0/24 (us-west-2a) - Bastion, NAT Gateway
 └── 10.0.2.0/24 (us-west-2b) - NAT Gateway (HA)
 
-Private Subnets:
-└── 10.0.10.0/24 (us-west-2a) - TGW Attachment
+Private Subnets (Auto-generated):
+├── 10.0.10.0/24 (us-west-2a) - TGW Attachment
+└── 10.0.11.0/24 (us-west-2b) - TGW Attachment (HA)
 ```
 
 #### Spoke VPC (10.1.0.0/16)
 ```
-Private Subnets Only:
+Private Subnets Only (Auto-generated):
 ├── 10.1.1.0/24 (us-west-2a) - K3s Masters, Workers, DBs
 └── 10.1.2.0/24 (us-west-2b) - K3s Masters, Workers, DBs
+```
+
+### Flexible Subnet Configuration
+
+Users can control subnet allocation in multiple ways:
+
+#### Option 1: Auto-Generated (Default)
+```hcl
+# Uses first 2 AZs with calculated subnets
+max_azs = 2
+# Hub: 10.0.1.0/24, 10.0.2.0/24 (public), 10.0.10.0/24, 10.0.11.0/24 (private)
+# Spoke: 10.1.1.0/24, 10.1.2.0/24 (private)
+```
+
+#### Option 2: Control AZ Count
+```hcl
+# Use 3 availability zones
+max_azs = 3
+# Auto-generates 3 subnets per type
+```
+
+#### Option 3: Manual Subnet Definition
+```hcl
+# Hub - Define exact subnets
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24", "10.0.12.0/24"]
+
+# Spoke - Define exact subnets  
+private_subnet_cidrs = ["10.1.1.0/24", "10.1.2.0/24", "10.1.3.0/24"]
 ```
 
 ### Routing Architecture
@@ -90,7 +122,7 @@ Private Subnets Only:
 ```
 Internet ←→ IGW ←→ Public Subnets ←→ NAT Gateway
                         ↓
-                   Transit Gateway
+                   Transit Gateway (Multi-AZ)
                         ↓
               Private Subnets (Hub/Spoke)
 ```
@@ -101,22 +133,23 @@ Internet ←→ IGW ←→ Public Subnets ←→ NAT Gateway
 
 ### 1. Shared Services Layer
 
-#### ECR Repository (`modules/shared-ecr`)
+#### ECR Repository (`modules/shared`)
 **Purpose**: Centralized Docker image storage for all environments
 
 **Components**:
-- **ECR Repository**: Stores Docker images with AES256 encryption
+- **ECR Repository**: `fitsync-ecr` with AES256 encryption
 - **Lifecycle Policy**: Automatically deletes untagged images > 14 days
-- **Repository Policy**: Allows cross-account access via IAM root principal
+- **Repository Policy**: Allows same-account access with principal condition
 - **Image Scanning**: Vulnerability scanning on push enabled
 
 **Security Features**:
 - Encryption at rest (AES256)
 - Vulnerability scanning
-- Access control via IAM policies
+- Access control via IAM policies with account condition
 - Lifecycle management for cost optimization
+- No manual account ID configuration required
 
-### 2. Hub Layer (`modules/hub-network`)
+### 2. Hub Layer (`modules/hub`)
 
 #### VPC Infrastructure
 **Purpose**: Central networking hub for all spoke connections
@@ -125,8 +158,8 @@ Internet ←→ IGW ←→ Public Subnets ←→ NAT Gateway
 - **VPC**: 10.0.0.0/16 with DNS resolution enabled
 - **Internet Gateway**: Provides internet access
 - **NAT Gateways**: Multi-AZ for high availability internet egress
-- **Public Subnets**: Host bastion and NAT gateways
-- **Private Subnets**: TGW attachment points
+- **Public Subnets**: Host bastion and NAT gateways (auto-generated or manual)
+- **Private Subnets**: Multi-AZ TGW attachment points (auto-generated or manual)
 
 #### Transit Gateway (TGW)
 **Purpose**: Central router connecting all VPCs
@@ -136,6 +169,7 @@ Internet ←→ IGW ←→ Public Subnets ←→ NAT Gateway
 - Default route table association: Enabled
 - Default route table propagation: Enabled
 - DNS support: Enabled
+- Multi-AZ attachment for high availability
 
 **Routing Logic**:
 ```
@@ -153,8 +187,9 @@ Default Route Table:
 - **AMI**: Ubuntu 24.04 LTS (via SSM parameter)
 - **Placement**: Public subnet with public IP
 - **Security Group**: SSH (22) from admin CIDR only
+- **Conditional Protection**: Based on `enable_deletion_protection`
 
-### 3. Spoke Layer (`modules/spoke-infra`)
+### 3. Spoke Layer (`modules/spoke`)
 
 #### VPC Infrastructure
 **Purpose**: Isolated environment for application workloads
@@ -163,6 +198,7 @@ Default Route Table:
 - **Private Subnets Only**: No internet gateways
 - **No NAT Gateways**: All internet traffic via hub
 - **TGW Connectivity**: Routes to hub for internet access
+- **Multi-AZ Support**: Configurable AZ count with auto-generation
 
 #### VPC Endpoints (PrivateLink)
 **Purpose**: Private access to AWS services without internet routing
@@ -391,9 +427,9 @@ terraform apply
 ```
 
 **Resources Created**:
-- ECR repository with lifecycle policies
-- Repository access policies
-- Resource group for ECR resources
+- ECR repository (`fitsync-ecr`) with lifecycle policies
+- Repository access policies (auto-detects account ID)
+- Resource group for shared resources
 
 #### Phase 2: Hub Infrastructure  
 ```bash
@@ -404,7 +440,7 @@ terraform apply
 ```
 
 **Resources Created**:
-- Hub VPC with public/private subnets
+- Hub VPC with multi-AZ public/private subnets
 - Internet Gateway and NAT Gateways
 - Transit Gateway with default routing
 - Bastion host with security groups
@@ -420,7 +456,7 @@ terraform apply
 ```
 
 **Resources Created**:
-- Spoke VPC with private subnets only
+- Spoke VPC with multi-AZ private subnets only
 - VPC endpoints for ECR and S3 access
 - TGW attachment and routing configuration
 - K3s master/worker/database instances
@@ -429,7 +465,80 @@ terraform apply
 - IAM roles and instance profiles
 - Resource group for spoke resources
 
-### Configuration Options
+## Configuration Guide
+
+### Basic Configuration
+
+#### Shared Services (`live/00-shared-global/conf.auto.tfvars`)
+```hcl
+project_name               = "fitsync"
+aws_region                 = "us-east-2"
+env                        = "shared"
+enable_deletion_protection = false
+```
+
+#### Hub Configuration (`live/01-hub-prod/conf.auto.tfvars`)
+```hcl
+project_name               = "fitsync"
+aws_region                 = "us-east-2"
+env                        = "prod-hub"
+vpc_cidr                   = "10.0.0.0/16"
+admin_cidr                 = "0.0.0.0/0"
+public_key_path            = "../../ssh-keys/aws-key.pub"
+enable_deletion_protection = false
+
+# Optional: Control number of AZs (default: 2)
+max_azs = 2
+
+# Optional: Manually define subnet CIDRs (auto-generated if empty)
+# public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
+# private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
+```
+
+#### Spoke Configuration (`live/02-spoke-prod/conf.auto.tfvars`)
+```hcl
+project_name               = "fitsync"
+aws_region                 = "us-east-2"
+env                        = "prod-spoke"
+hub_env                    = "prod-hub"
+vpc_cidr                   = "10.1.0.0/16"
+master_count               = 1
+worker_count               = 1
+db_count                   = 1
+db_vol_size                = 50
+instance_type              = "t3.micro"
+public_key_path            = "../../ssh-keys/aws-key.pub"
+enable_deletion_protection = false
+
+# Optional: Control number of AZs (default: 2)
+max_azs = 2
+
+# Optional: Manually define subnet CIDRs (auto-generated if empty)
+# private_subnet_cidrs = ["10.1.1.0/24", "10.1.2.0/24"]
+```
+
+### Advanced Configuration Options
+
+#### Multi-AZ Deployment
+```hcl
+# Use 3 availability zones
+max_azs = 3
+
+# Auto-generates 3 subnets per type:
+# Hub: 10.0.1.0/24, 10.0.2.0/24, 10.0.3.0/24 (public)
+#      10.0.10.0/24, 10.0.11.0/24, 10.0.12.0/24 (private)
+# Spoke: 10.1.1.0/24, 10.1.2.0/24, 10.1.3.0/24 (private)
+```
+
+#### Custom Subnet Configuration
+```hcl
+# Hub - Define exact subnets
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24", "10.0.12.0/24"]
+
+# Spoke - Define exact subnets  
+private_subnet_cidrs = ["10.1.1.0/24", "10.1.2.0/24", "10.1.3.0/24"]
+```
 
 #### AMI Selection
 ```hcl
@@ -536,6 +645,11 @@ kubectl get nodes
 - **Cost Allocation** → Filter by Module and Env tags
 - **Compliance** → Check resource tagging and protection
 
+**Resource Groups Created**:
+- `fitsync-shared-resources` - Shared ECR resources
+- `fitsync-prod-hub-resources` - Hub networking resources  
+- `fitsync-prod-spoke-resources` - Spoke infrastructure resources
+
 #### Health Checks
 ```bash
 # Check TGW route propagation
@@ -545,7 +659,7 @@ aws ec2 describe-transit-gateway-route-tables
 aws ec2 describe-vpc-endpoints
 
 # Check instance health
-aws ec2 describe-instances --filters "Name=tag:Module,Values=spoke-infra"
+aws ec2 describe-instances --filters "Name=tag:Project,Values=fitsync"
 ```
 
 ### Scaling Operations
@@ -556,7 +670,7 @@ aws ec2 describe-instances --filters "Name=tag:Module,Values=spoke-infra"
    ```hcl
    env = "dev-spoke"
    vpc_cidr = "10.2.0.0/16"
-   private_subnets = ["10.2.1.0/24", "10.2.2.0/24"]
+   private_subnet_cidrs = ["10.2.1.0/24", "10.2.2.0/24"]
    ```
 3. Deploy: `terraform init && terraform apply`
 
@@ -710,22 +824,33 @@ resource "aws_network_acl" "spoke_private" {
 - **Horizontal**: Easy to add new spokes
 - **Vertical**: Scale instances within spokes
 - **Geographic**: Deploy spokes in different regions
+- **Flexible AZ Control**: Configure 2-3 AZs per environment
 
 ### Security
 - **Network Isolation**: Private subnets with controlled routing
 - **Centralized Access**: Single bastion for SSH access
 - **Service Isolation**: VPC endpoints for AWS service access
 - **Least Privilege**: Minimal IAM permissions
+- **Automatic Account Detection**: No manual account ID configuration
 
 ### Cost Efficiency
 - **Shared Infrastructure**: Hub services shared across spokes
 - **Resource Optimization**: Right-sized instances
 - **Automated Cleanup**: Lifecycle policies for cost control
+- **Simplified ECR**: Auto-generated repository names
 
 ### Operational Excellence
 - **Infrastructure as Code**: Complete Terraform automation
 - **Standardized Tagging**: Consistent resource organization
 - **Resource Groups**: Easy resource management
 - **Deletion Protection**: Prevents accidental resource loss
+- **Modular Design**: Clean separation between modules
+- **Data Organization**: Separate data.tf files for clarity
+
+### Configuration Flexibility
+- **Auto-Generated Subnets**: Sensible defaults with clear patterns
+- **Manual Override**: Full control over subnet allocation
+- **AZ Selection**: Control number of availability zones
+- **Project-Based Naming**: Consistent `fitsync` prefix throughout
 
 This architecture provides a robust, secure, and scalable foundation for self-managed Kubernetes workloads on AWS while maintaining cost efficiency and operational simplicity.

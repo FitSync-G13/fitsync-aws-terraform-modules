@@ -15,5 +15,5 @@ output "vpc_cidr_block" {
 
 output "bastion_public_ip" {
   description = "Public IP of the bastion host"
-  value       = aws_instance.bastion.public_ip
+  value       = var.enable_deletion_protection ? aws_instance.bastion_protected[0].public_ip : aws_instance.bastion[0].public_ip
 }

@@ -2,11 +2,10 @@ provider "aws" {
   region = var.aws_region
 }
 
-module "shared_ecr" {
-  source = "../../modules/shared-ecr"
+module "shared" {
+  source = "../../modules/shared"
 
-  repository_name            = var.repository_name
-  account_id                 = var.account_id
+  project_name               = var.project_name
   env                        = var.env
   enable_deletion_protection = var.enable_deletion_protection
 }

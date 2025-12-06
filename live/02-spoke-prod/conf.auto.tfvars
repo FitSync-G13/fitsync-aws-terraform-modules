@@ -1,9 +1,8 @@
-aws_region                 = "us-west-2"
+project_name               = "fitsync"
+aws_region                 = "us-east-2"
 env                        = "prod-spoke"
 hub_env                    = "prod-hub"
 vpc_cidr                   = "10.1.0.0/16"
-availability_zones         = ["us-west-2a", "us-west-2b"]
-private_subnets            = ["10.1.1.0/24", "10.1.2.0/24"]
 master_count               = 1
 worker_count               = 1
 db_count                   = 1

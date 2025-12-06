@@ -2,32 +2,18 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Dynamic discovery of Hub resources
-data "aws_ec2_transit_gateway" "hub" {
-  filter {
-    name   = "tag:Name"
-    values = ["${var.hub_env}-tgw"]
-  }
-}
-
-data "aws_vpc" "hub" {
-  filter {
-    name   = "tag:Name"
-    values = ["${var.hub_env}-vpc"]
-  }
-}
-
 module "spoke" {
-  source = "../../modules/spoke-infra"
+  source = "../../modules/spoke"
 
+  project_name               = var.project_name
   hub_env                    = var.hub_env
   aws_region                 = var.aws_region
   env                        = var.env
   hub_tgw_id                 = data.aws_ec2_transit_gateway.hub.id
   hub_vpc_cidr               = data.aws_vpc.hub.cidr_block
   vpc_cidr                   = var.vpc_cidr
-  availability_zones         = var.availability_zones
-  private_subnets            = var.private_subnets
+  max_azs                    = var.max_azs
+  private_subnet_cidrs       = var.private_subnet_cidrs
   master_count               = var.master_count
   worker_count               = var.worker_count
   db_count                   = var.db_count

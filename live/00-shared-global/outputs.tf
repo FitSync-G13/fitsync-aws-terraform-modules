@@ -1,9 +1,9 @@
 output "repository_url" {
   description = "URL of the ECR repository"
-  value       = module.shared_ecr.repository_url
+  value       = module.shared.repository_url
 }
 
 output "repository_arn" {
   description = "ARN of the ECR repository"
-  value       = module.shared_ecr.repository_arn
+  value       = module.shared.repository_arn
 }

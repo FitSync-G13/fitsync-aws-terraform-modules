@@ -3,6 +3,11 @@ variable "aws_region" {
   type        = string
 }
 
+variable "project_name" {
+  description = "Name of the project"
+  type        = string
+}
+
 variable "enable_deletion_protection" {
   description = "Enable deletion protection for critical resources"
   type        = bool
@@ -20,23 +25,26 @@ variable "env" {
   type        = string
 }
 
+variable "max_azs" {
+  description = "Maximum number of availability zones to use"
+  type        = number
+  default     = 2
+}
+
+variable "public_subnet_cidrs" {
+  description = "List of public subnet CIDR blocks (auto-generated if empty). Example: ['10.0.1.0/24', '10.0.2.0/24']"
+  type        = list(string)
+  default     = []
+}
+
+variable "private_subnet_cidrs" {
+  description = "List of private subnet CIDR blocks (auto-generated if empty). Example: ['10.0.10.0/24', '10.0.11.0/24']"
+  type        = list(string)
+  default     = []
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
-  type        = string
-}
-
-variable "availability_zones" {
-  description = "List of availability zones"
-  type        = list(string)
-}
-
-variable "public_subnets" {
-  description = "List of public subnet CIDR blocks"
-  type        = list(string)
-}
-
-variable "private_subnets" {
-  description = "Private subnet CIDR block"
   type        = string
 }
 
