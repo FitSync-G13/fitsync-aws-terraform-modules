@@ -1,25 +1,33 @@
 module "spoke" {
   source = "../../modules/spoke"
 
-  project_name               = var.project_name
-  hub_env                    = var.hub_env
-  aws_region                 = var.aws_region
-  env                        = var.env
-  hub_tgw_id                 = data.aws_ec2_transit_gateway.hub.id
-  hub_vpc_cidr               = data.aws_vpc.hub.cidr_block
-  vpc_cidr                   = var.vpc_cidr
-  max_azs                    = var.max_azs
-  private_subnet_cidrs       = var.private_subnet_cidrs
-  master_count               = var.master_count
-  worker_count               = var.worker_count
-  db_count                   = var.db_count
-  db_vol_size                = var.db_vol_size
-  master_instance_type       = var.master_instance_type
-  worker_instance_type       = var.worker_instance_type
-  db_instance_type           = var.db_instance_type
-  public_key_path            = var.public_key_path
-  ssm_parameter_name         = var.ssm_parameter_name
-  github_repo                = var.github_repo
-  deployment_environment     = var.deployment_environment
-  enable_deletion_protection = var.enable_deletion_protection
+  project_name                      = var.project_name
+  hub_env                           = var.hub_env
+  aws_region                        = var.aws_region
+  env                               = var.env
+  hub_tgw_id                        = data.aws_ec2_transit_gateway.hub.id
+  hub_vpc_cidr                      = data.aws_vpc.hub.cidr_block
+  vpc_cidr                          = var.vpc_cidr
+  max_azs                           = var.max_azs
+  private_subnet_cidrs              = var.private_subnet_cidrs
+  master_count                      = var.master_count
+  worker_count                      = var.worker_count
+  db_count                          = var.db_count
+  db_vol_size                       = var.db_vol_size
+  master_instance_type              = var.master_instance_type
+  worker_instance_type              = var.worker_instance_type
+  db_instance_type                  = var.db_instance_type
+  public_key_path                   = var.public_key_path
+  ssm_parameter_name                = var.ssm_parameter_name
+  github_repo                       = var.github_repo
+  deployment_environment            = var.deployment_environment
+  enable_deletion_protection        = var.enable_deletion_protection
+  domain_name                       = var.domain_name
+  subdomain_prefix                  = var.subdomain_prefix
+  cloudflare_api_token              = var.cloudflare_api_token
+  cloudflare_api_key                = var.cloudflare_api_key
+  cloudflare_email                  = var.cloudflare_email
+  enable_cloudflare_restriction     = var.enable_cloudflare_restriction
+  acm_certificate_validation_method = var.acm_certificate_validation_method
 }
+
