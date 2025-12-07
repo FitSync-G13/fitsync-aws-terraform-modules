@@ -17,3 +17,8 @@ output "db_private_ips" {
   description = "Private IP addresses of database nodes"
   value       = module.spoke.db_private_ips
 }
+
+output "public_nlb_dns" {
+  description = "Public NLB DNS for internet access"
+  value       = module.spoke.public_nlb_dns
+}

@@ -189,6 +189,24 @@ resource "aws_security_group" "cluster" {
     cidr_blocks = [var.hub_vpc_cidr]
   }
 
+  # NodePort HTTP from hub VPC (for NLB health checks and traffic)
+  ingress {
+    from_port   = 30080
+    to_port     = 30080
+    protocol    = "tcp"
+    cidr_blocks = [var.hub_vpc_cidr]
+    description = "Istio ingress HTTP NodePort from hub NLB"
+  }
+
+  # NodePort HTTPS from hub VPC (for NLB health checks and traffic)
+  ingress {
+    from_port   = 30443
+    to_port     = 30443
+    protocol    = "tcp"
+    cidr_blocks = [var.hub_vpc_cidr]
+    description = "Istio ingress HTTPS NodePort from hub NLB"
+  }
+
   # All traffic within VPC
   ingress {
     from_port   = 0
@@ -385,4 +403,124 @@ resource "aws_resourcegroups_group" "spoke_resources" {
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-resources"
   })
+}
+
+# Public NLB in Hub VPC for internet access to this spoke
+# This NLB lives in hub's public subnets but is managed by spoke module
+# Traffic flow: Internet -> Hub Public NLB -> TGW -> Spoke Worker NodePort -> Istio
+resource "aws_lb" "public_ingress" {
+  name               = "${var.project_name}-${var.env}-public-nlb"
+  internal           = false
+  load_balancer_type = "network"
+  subnets            = [for assoc in data.aws_route_table.hub_public.associations : assoc.subnet_id if assoc.subnet_id != ""]
+
+  enable_deletion_protection = var.enable_deletion_protection
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-public-nlb"
+  })
+}
+
+# Target group for HTTP traffic (port 80 -> NodePort 30080)
+resource "aws_lb_target_group" "public_http" {
+  name        = "${var.project_name}-${var.env}-pub-http"
+  port        = 30080
+  protocol    = "TCP"
+  target_type = "ip"
+  vpc_id      = data.aws_vpc.hub.id
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    port                = 30080
+    protocol            = "TCP"
+    timeout             = 10
+    unhealthy_threshold = 2
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-pub-http-tg"
+  })
+}
+
+# Target group for HTTPS traffic (port 443 -> NodePort 30443)
+resource "aws_lb_target_group" "public_https" {
+  name        = "${var.project_name}-${var.env}-pub-https"
+  port        = 30443
+  protocol    = "TCP"
+  target_type = "ip"
+  vpc_id      = data.aws_vpc.hub.id
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    port                = 30080
+    protocol            = "TCP"
+    timeout             = 10
+    unhealthy_threshold = 2
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-pub-https-tg"
+  })
+}
+
+# Register spoke worker private IPs as targets (cross-VPC via TGW)
+resource "aws_lb_target_group_attachment" "public_http_workers" {
+  count             = var.worker_count
+  target_group_arn  = aws_lb_target_group.public_http.arn
+  target_id         = aws_instance.k3s_workers[count.index].private_ip
+  port              = 30080
+  availability_zone = aws_instance.k3s_workers[count.index].availability_zone
+}
+
+resource "aws_lb_target_group_attachment" "public_https_workers" {
+  count             = var.worker_count
+  target_group_arn  = aws_lb_target_group.public_https.arn
+  target_id         = aws_instance.k3s_workers[count.index].private_ip
+  port              = 30443
+  availability_zone = aws_instance.k3s_workers[count.index].availability_zone
+}
+
+# Register spoke master private IPs as targets (cross-VPC via TGW)
+resource "aws_lb_target_group_attachment" "public_http_masters" {
+  count             = var.master_count
+  target_group_arn  = aws_lb_target_group.public_http.arn
+  target_id         = aws_instance.k3s_masters[count.index].private_ip
+  port              = 30080
+  availability_zone = aws_instance.k3s_masters[count.index].availability_zone
+}
+
+resource "aws_lb_target_group_attachment" "public_https_masters" {
+  count             = var.master_count
+  target_group_arn  = aws_lb_target_group.public_https.arn
+  target_id         = aws_instance.k3s_masters[count.index].private_ip
+  port              = 30443
+  availability_zone = aws_instance.k3s_masters[count.index].availability_zone
+}
+
+# HTTP listener (port 80)
+resource "aws_lb_listener" "public_http" {
+  load_balancer_arn = aws_lb.public_ingress.arn
+  port              = "80"
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.public_http.arn
+  }
+}
+
+# HTTPS listener (port 443)
+resource "aws_lb_listener" "public_https" {
+  load_balancer_arn = aws_lb.public_ingress.arn
+  port              = "443"
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.public_https.arn
+  }
 }

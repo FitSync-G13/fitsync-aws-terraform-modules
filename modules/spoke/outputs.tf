@@ -17,3 +17,13 @@ output "db_private_ips" {
   description = "Private IP addresses of database nodes"
   value       = aws_instance.databases[*].private_ip
 }
+
+output "public_nlb_dns" {
+  description = "DNS name of the public NLB in hub VPC"
+  value       = aws_lb.public_ingress.dns_name
+}
+
+output "public_nlb_arn" {
+  description = "ARN of the public NLB in hub VPC"
+  value       = aws_lb.public_ingress.arn
+}

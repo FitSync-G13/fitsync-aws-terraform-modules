@@ -50,3 +50,8 @@ data "aws_ec2_transit_gateway_vpc_attachment" "hub_attachment" {
     values = [var.hub_tgw_id]
   }
 }
+
+data "aws_route_table" "hub_public_subnets" {
+  for_each = toset(data.aws_route_table.hub_public.associations[*].subnet_id)
+  subnet_id = each.value
+}
