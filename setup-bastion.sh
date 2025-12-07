@@ -35,10 +35,14 @@ rm cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
 # Install istioctl (latest)
 echo "Installing latest istioctl..."
 cd /tmp
-ISTIO_VERSION=$(curl -sL https://istio.io/downloadIstio | grep -oP 'ISTIO_VERSION=\K[0-9.]+' | head -1)
 curl -L https://istio.io/downloadIstio | sh -
-sudo cp istio-${ISTIO_VERSION}/bin/istioctl /usr/local/bin/
-rm -rf istio-${ISTIO_VERSION}
+ISTIO_DIR=$(ls -d istio-* 2>/dev/null | head -1)
+if [ -n "$ISTIO_DIR" ]; then
+  sudo cp ${ISTIO_DIR}/bin/istioctl /usr/local/bin/
+  rm -rf ${ISTIO_DIR}
+else
+  echo "Warning: Could not find Istio directory"
+fi
 cd -
 
 # Install k9s (latest Kubernetes CLI UI)
