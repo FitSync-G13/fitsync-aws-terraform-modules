@@ -15,11 +15,6 @@ variable "ssm_parameter_name" {
   default     = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
 }
 
-variable "hub_env" {
-  description = "Hub environment name for resource discovery"
-  type        = string
-}
-
 variable "aws_region" {
   description = "AWS region"
   type        = string
@@ -30,23 +25,13 @@ variable "env" {
   type        = string
 }
 
-variable "hub_tgw_id" {
-  description = "Transit Gateway ID from hub"
-  type        = string
-}
-
-variable "hub_vpc_cidr" {
-  description = "CIDR block of the hub VPC"
-  type        = string
-}
-
-variable "vpc_cidr" {
-  description = "CIDR block for the spoke VPC"
+variable "hub_env" {
+  description = "Hub environment name for resource discovery"
   type        = string
 }
 
 variable "max_azs" {
-  description = "Maximum number of availability zones to use (default: 2)"
+  description = "Maximum number of availability zones to use"
   type        = number
   default     = 2
 }
@@ -55,6 +40,11 @@ variable "private_subnet_cidrs" {
   description = "List of private subnet CIDR blocks (auto-generated if empty). Example: ['10.1.1.0/24', '10.1.2.0/24']"
   type        = list(string)
   default     = []
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block for the spoke VPC"
+  type        = string
 }
 
 variable "master_count" {

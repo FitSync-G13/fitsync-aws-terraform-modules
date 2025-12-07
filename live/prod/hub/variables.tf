@@ -1,3 +1,8 @@
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+}
+
 variable "project_name" {
   description = "Name of the project"
   type        = string
@@ -9,18 +14,19 @@ variable "enable_deletion_protection" {
   default     = true
 }
 
+variable "ssm_parameter_name" {
+  description = "SSM parameter path for AMI ID"
+  type        = string
+  default     = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+}
+
 variable "env" {
   description = "Environment name"
   type        = string
 }
 
-variable "vpc_cidr" {
-  description = "CIDR block for the VPC"
-  type        = string
-}
-
 variable "max_azs" {
-  description = "Maximum number of availability zones to use (default: 2)"
+  description = "Maximum number of availability zones to use"
   type        = number
   default     = 2
 }
@@ -37,24 +43,18 @@ variable "private_subnet_cidrs" {
   default     = []
 }
 
-variable "admin_cidr" {
-  description = "CIDR block for admin access to bastion"
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
   type        = string
 }
 
-variable "ssm_parameter_name" {
-  description = "SSM parameter path for AMI ID"
+variable "admin_cidr" {
+  description = "CIDR block for admin access"
   type        = string
-  default     = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
 }
 
 variable "public_key_path" {
   description = "Path to the public key file"
-  type        = string
-}
-
-variable "aws_region" {
-  description = "AWS region"
   type        = string
 }
 

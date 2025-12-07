@@ -150,4 +150,3 @@ variable "acm_certificate_validation_method" {
   type        = string
   default     = "DNS"
 }
-

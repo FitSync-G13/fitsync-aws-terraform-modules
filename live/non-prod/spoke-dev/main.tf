@@ -1,5 +1,5 @@
 module "spoke" {
-  source = "../../modules/spoke"
+  source = "../../../modules/spoke"
 
   project_name                      = var.project_name
   hub_env                           = var.hub_env
@@ -20,6 +20,7 @@ module "spoke" {
   public_key_path                   = var.public_key_path
   ssm_parameter_name                = var.ssm_parameter_name
   github_repo                       = var.github_repo
+  github_token                      = var.github_token
   deployment_environment            = var.deployment_environment
   enable_deletion_protection        = var.enable_deletion_protection
   domain_name                       = var.domain_name
@@ -30,4 +31,3 @@ module "spoke" {
   enable_cloudflare_restriction     = var.enable_cloudflare_restriction
   acm_certificate_validation_method = var.acm_certificate_validation_method
 }
-

@@ -1,3 +1,104 @@
+# GitHub Actions OIDC Provider
+resource "aws_iam_openid_connect_provider" "github_actions" {
+  url = "https://token.actions.githubusercontent.com"
+
+  client_id_list = [
+    "sts.amazonaws.com",
+  ]
+
+  thumbprint_list = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1",
+    "1c58a3a8518e8759bf075b76b750d4f2df264fcd"
+  ]
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-github-oidc"
+  })
+}
+
+# IAM Role for GitHub Actions
+resource "aws_iam_role" "github_actions" {
+  name = "${var.project_name}-${var.env}-github-actions-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github_actions.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-github-actions-role"
+  })
+}
+
+# Policy for EC2 and SSM access
+resource "aws_iam_role_policy" "github_actions_policy" {
+  name = "${var.project_name}-${var.env}-github-actions-policy"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeInstances",
+          "ec2:DescribeInstanceStatus",
+          "ec2:DescribeTags",
+          "ssm:SendCommand",
+          "ssm:ListCommandInvocations",
+          "ssm:DescribeInstanceInformation",
+          "ssm:GetCommandInvocation",
+          "ssm:StartSession",
+          "ssm:TerminateSession",
+          "ssm:ResumeSession",
+          "ssm:DescribeSessions",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:PutParameter"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "elbv2:DescribeLoadBalancers",
+          "elbv2:DescribeTargetGroups",
+          "elbv2:DescribeTargetHealth",
+          "elasticloadbalancing:DescribeLoadBalancers"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Attach managed policy for SSM
+resource "aws_iam_role_policy_attachment" "github_actions_ssm" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 resource "aws_route" "hub_to_spoke" {
   route_table_id         = data.aws_route_table.hub_public.id
   destination_cidr_block = var.vpc_cidr
@@ -345,31 +446,67 @@ resource "aws_lb_target_group_attachment" "k3s_masters" {
   port             = 6443
 }
 
-# Export spoke environment variables to GitHub (environment created by hub)
+# GitHub Environment for this spoke
+resource "github_repository_environment" "deployment_env" {
+  repository  = split("/", var.github_repo)[1]
+  environment = var.deployment_environment
+}
+
+# Environment-level AWS role secret
+resource "github_actions_environment_secret" "aws_role_arn" {
+  repository      = split("/", var.github_repo)[1]
+  environment     = github_repository_environment.deployment_env.environment
+  secret_name     = "AWS_ROLE_ARN"
+  plaintext_value = aws_iam_role.github_actions.arn
+}
+
+# Hub-level variables (previously created by hub)
+resource "github_actions_environment_variable" "aws_region" {
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "AWS_REGION"
+  value         = var.aws_region
+}
+
+resource "github_actions_environment_variable" "project_name" {
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "PROJECT_NAME"
+  value         = var.project_name
+}
+
+resource "github_actions_environment_variable" "hub_env" {
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "HUB_ENV"
+  value         = var.hub_env
+}
+
+# Spoke-specific variables
 resource "github_actions_environment_variable" "spoke_env" {
   repository      = split("/", var.github_repo)[1]
-  environment     = var.deployment_environment
+  environment     = github_repository_environment.deployment_env.environment
   variable_name   = "SPOKE_ENV"
   value           = var.env
 }
 
 resource "github_actions_environment_variable" "vpc_cidr" {
   repository      = split("/", var.github_repo)[1]
-  environment     = var.deployment_environment
+  environment     = github_repository_environment.deployment_env.environment
   variable_name   = "VPC_CIDR"
   value           = var.vpc_cidr
 }
 
 resource "github_actions_environment_variable" "master_count" {
   repository      = split("/", var.github_repo)[1]
-  environment     = var.deployment_environment
+  environment     = github_repository_environment.deployment_env.environment
   variable_name   = "MASTER_COUNT"
   value           = tostring(var.master_count)
 }
 
 resource "github_actions_environment_variable" "worker_count" {
   repository      = split("/", var.github_repo)[1]
-  environment     = var.deployment_environment
+  environment     = github_repository_environment.deployment_env.environment
   variable_name   = "WORKER_COUNT"
   value           = tostring(var.worker_count)
 }
@@ -377,7 +514,7 @@ resource "github_actions_environment_variable" "worker_count" {
 resource "github_actions_environment_variable" "domain_name" {
   count           = var.domain_name != "" ? 1 : 0
   repository      = split("/", var.github_repo)[1]
-  environment     = var.deployment_environment
+  environment     = github_repository_environment.deployment_env.environment
   variable_name   = "DOMAIN_NAME"
   value           = var.domain_name
 }
@@ -385,7 +522,7 @@ resource "github_actions_environment_variable" "domain_name" {
 resource "github_actions_environment_variable" "subdomain_prefix" {
   count           = var.domain_name != "" && var.subdomain_prefix != "" ? 1 : 0
   repository      = split("/", var.github_repo)[1]
-  environment     = var.deployment_environment
+  environment     = github_repository_environment.deployment_env.environment
   variable_name   = "SUBDOMAIN_PREFIX"
   value           = var.subdomain_prefix
 }
@@ -393,7 +530,7 @@ resource "github_actions_environment_variable" "subdomain_prefix" {
 resource "github_actions_environment_variable" "cert_email" {
   count           = var.domain_name != "" ? 1 : 0
   repository      = split("/", var.github_repo)[1]
-  environment     = var.deployment_environment
+  environment     = github_repository_environment.deployment_env.environment
   variable_name   = "CERT_EMAIL"
   value           = var.cloudflare_email
 }
@@ -401,7 +538,7 @@ resource "github_actions_environment_variable" "cert_email" {
 resource "github_actions_environment_secret" "cloudflare_api_token" {
   count           = var.domain_name != "" && (var.cloudflare_api_token != "" || var.cloudflare_api_key != "") ? 1 : 0
   repository      = split("/", var.github_repo)[1]
-  environment     = var.deployment_environment
+  environment     = github_repository_environment.deployment_env.environment
   secret_name     = "CLOUDFLARE_API_TOKEN"
   plaintext_value = var.cloudflare_api_token != "" ? var.cloudflare_api_token : var.cloudflare_api_key
 }
@@ -709,4 +846,3 @@ resource "cloudflare_ruleset" "transform_add_header" {
     }
   }]
 }
-

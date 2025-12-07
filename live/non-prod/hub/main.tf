@@ -1,5 +1,5 @@
 module "hub" {
-  source = "../../modules/hub"
+  source = "../../../modules/hub"
 
   project_name               = var.project_name
   env                        = var.env
@@ -11,9 +11,6 @@ module "hub" {
   admin_cidr                 = var.admin_cidr
   public_key_path            = var.public_key_path
   ssm_parameter_name         = var.ssm_parameter_name
-  github_repo                = var.github_repo
-  github_token               = var.github_token
-  deployment_environment     = var.deployment_environment
   bastion_instance_type      = var.bastion_instance_type
   enable_deletion_protection = var.enable_deletion_protection
 }

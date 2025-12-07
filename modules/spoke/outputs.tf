@@ -42,4 +42,3 @@ output "wildcard_domain" {
   description = "Wildcard domain for applications (empty if not configured)"
   value       = var.domain_name != "" ? "*.${var.domain_name}" : ""
 }
-

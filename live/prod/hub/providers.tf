@@ -4,5 +4,5 @@ provider "aws" {
 
 provider "github" {
   token = var.github_token
-  owner = split("/", var.github_repo)[0] # Extract owner from "owner/repo"
+  owner = split("/", var.github_repo)[0]
 }

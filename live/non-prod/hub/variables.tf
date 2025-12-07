@@ -58,22 +58,6 @@ variable "public_key_path" {
   type        = string
 }
 
-variable "github_repo" {
-  description = "GitHub repository for OIDC (format: owner/repo-name)"
-  type        = string
-}
-
-variable "github_token" {
-  description = "GitHub personal access token for managing secrets"
-  type        = string
-  sensitive   = true
-}
-
-variable "deployment_environment" {
-  description = "Deployment environment name (production, staging, development)"
-  type        = string
-}
-
 variable "bastion_instance_type" {
   description = "Instance type for bastion host"
   type        = string
