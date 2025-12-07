@@ -109,3 +109,48 @@ variable "deployment_environment" {
   description = "Deployment environment name (production, staging, development)"
   type        = string
 }
+
+variable "domain_name" {
+  description = "Domain name for this spoke (e.g., fitsync.online)"
+  type        = string
+  default     = ""
+}
+
+variable "subdomain_prefix" {
+  description = "Subdomain prefix for this spoke (empty for prod, e.g., staging, dev)"
+  type        = string
+  default     = ""
+}
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token for DNS management"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cloudflare_api_key" {
+  description = "Cloudflare Global API Key (alternative to api_token)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cloudflare_email" {
+  description = "Cloudflare account email (required with api_key)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "enable_cloudflare_restriction" {
+  description = "Restrict NLB traffic to Cloudflare IPs only"
+  type        = bool
+  default     = true
+}
+
+variable "acm_certificate_validation_method" {
+  description = "ACM certificate validation method (DNS or EMAIL)"
+  type        = string
+  default     = "DNS"
+}

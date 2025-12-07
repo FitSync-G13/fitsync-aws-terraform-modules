@@ -316,11 +316,9 @@ resource "aws_lb_target_group" "k3s_api" {
     enabled             = true
     healthy_threshold   = 2
     interval            = 30
-    matcher             = "200"
-    path                = "/healthz"
     port                = "traffic-port"
-    protocol            = "HTTP"
-    timeout             = 5
+    protocol            = "TCP"
+    timeout             = 10
     unhealthy_threshold = 2
   }
 
@@ -376,6 +374,38 @@ resource "github_actions_environment_variable" "worker_count" {
   value           = tostring(var.worker_count)
 }
 
+resource "github_actions_environment_variable" "domain_name" {
+  count           = var.domain_name != "" ? 1 : 0
+  repository      = split("/", var.github_repo)[1]
+  environment     = var.deployment_environment
+  variable_name   = "DOMAIN_NAME"
+  value           = var.domain_name
+}
+
+resource "github_actions_environment_variable" "subdomain_prefix" {
+  count           = var.domain_name != "" && var.subdomain_prefix != "" ? 1 : 0
+  repository      = split("/", var.github_repo)[1]
+  environment     = var.deployment_environment
+  variable_name   = "SUBDOMAIN_PREFIX"
+  value           = var.subdomain_prefix
+}
+
+resource "github_actions_environment_variable" "cert_email" {
+  count           = var.domain_name != "" ? 1 : 0
+  repository      = split("/", var.github_repo)[1]
+  environment     = var.deployment_environment
+  variable_name   = "CERT_EMAIL"
+  value           = var.cloudflare_email
+}
+
+resource "github_actions_environment_secret" "cloudflare_api_token" {
+  count           = var.domain_name != "" && (var.cloudflare_api_token != "" || var.cloudflare_api_key != "") ? 1 : 0
+  repository      = split("/", var.github_repo)[1]
+  environment     = var.deployment_environment
+  secret_name     = "CLOUDFLARE_API_TOKEN"
+  plaintext_value = var.cloudflare_api_token != "" ? var.cloudflare_api_token : var.cloudflare_api_key
+}
+
 # Resource Group
 resource "aws_resourcegroups_group" "spoke_resources" {
   name = "${var.project_name}-${var.env}-resources"
@@ -405,50 +435,114 @@ resource "aws_resourcegroups_group" "spoke_resources" {
   })
 }
 
-# Public NLB in Hub VPC for internet access to this spoke
-# This NLB lives in hub's public subnets but is managed by spoke module
-# Traffic flow: Internet -> Hub Public NLB -> TGW -> Spoke Worker NodePort -> Istio
+# Public ALB in Hub VPC with end-to-end encryption
 resource "aws_lb" "public_ingress" {
-  name               = "${var.project_name}-${var.env}-public-nlb"
+  name               = "${var.project_name}-${var.env}-public-alb"
   internal           = false
-  load_balancer_type = "network"
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
   subnets            = [for assoc in data.aws_route_table.hub_public.associations : assoc.subnet_id if assoc.subnet_id != ""]
 
   enable_deletion_protection = var.enable_deletion_protection
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.env}-public-nlb"
+    Name = "${var.project_name}-${var.env}-public-alb"
   })
 }
 
-# Target group for HTTP traffic (port 80 -> NodePort 30080)
-resource "aws_lb_target_group" "public_http" {
-  name        = "${var.project_name}-${var.env}-pub-http"
-  port        = 30080
-  protocol    = "TCP"
-  target_type = "ip"
+# Security group for ALB
+resource "aws_security_group" "alb" {
+  name_prefix = "${var.project_name}-${var.env}-alb-"
   vpc_id      = data.aws_vpc.hub.id
+  description = "Security group for public ALB"
 
-  health_check {
-    enabled             = true
-    healthy_threshold   = 2
-    interval            = 30
-    port                = 30080
-    protocol            = "TCP"
-    timeout             = 10
-    unhealthy_threshold = 2
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-alb-sg"
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_http" {
+  security_group_id = aws_security_group.alb.id
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+  cidr_ipv4         = "0.0.0.0/0"
+  description       = "HTTP from anywhere"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_https" {
+  security_group_id = aws_security_group.alb.id
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  cidr_ipv4         = "0.0.0.0/0"
+  description       = "HTTPS from anywhere"
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_all" {
+  security_group_id = aws_security_group.alb.id
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
+  description       = "Allow all outbound"
+}
+
+# ACM Certificate for ALB
+resource "aws_acm_certificate" "wildcard" {
+  count             = var.domain_name != "" ? 1 : 0
+  domain_name       = "*.${var.domain_name}"
+  validation_method = "DNS"
+  subject_alternative_names = [var.domain_name]
+
+  lifecycle {
+    create_before_destroy = true
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.env}-pub-http-tg"
+    Name = "${var.project_name}-${var.env}-wildcard-cert"
   })
 }
 
-# Target group for HTTPS traffic (port 443 -> NodePort 30443)
+# Cloudflare Zone lookup
+data "cloudflare_zone" "main" {
+  count = var.domain_name != "" ? 1 : 0
+  
+  filter = {
+    name = var.domain_name
+  }
+}
+
+# Cloudflare DNS records for ACM validation
+resource "cloudflare_dns_record" "cert_validation" {
+  for_each = var.domain_name != "" ? {
+    for dvo in distinct([
+      for d in aws_acm_certificate.wildcard[0].domain_validation_options : {
+        name   = d.resource_record_name
+        record = d.resource_record_value
+        type   = d.resource_record_type
+      }
+    ]) : dvo.name => dvo
+  } : {}
+
+  zone_id = data.cloudflare_zone.main[0].id
+  name    = trimsuffix(each.value.name, ".")
+  content = trimsuffix(each.value.record, ".")
+  type    = each.value.type
+  ttl     = 60
+  proxied = false
+}
+
+# ACM Certificate validation
+resource "aws_acm_certificate_validation" "wildcard" {
+  count                   = var.domain_name != "" ? 1 : 0
+  certificate_arn         = aws_acm_certificate.wildcard[0].arn
+  validation_record_fqdns = [for record in cloudflare_dns_record.cert_validation : record.name]
+}
+
+# Target group for HTTPS backend (ALB -> Istio HTTPS on 30443)
 resource "aws_lb_target_group" "public_https" {
   name        = "${var.project_name}-${var.env}-pub-https"
   port        = 30443
-  protocol    = "TCP"
+  protocol    = "HTTPS"
   target_type = "ip"
   vpc_id      = data.aws_vpc.hub.id
 
@@ -456,10 +550,12 @@ resource "aws_lb_target_group" "public_https" {
     enabled             = true
     healthy_threshold   = 2
     interval            = 30
-    port                = 30080
-    protocol            = "TCP"
+    path                = "/"
+    port                = 30443
+    protocol            = "HTTPS"
     timeout             = 10
     unhealthy_threshold = 2
+    matcher             = "200-499"
   }
 
   tags = merge(local.common_tags, {
@@ -467,15 +563,7 @@ resource "aws_lb_target_group" "public_https" {
   })
 }
 
-# Register spoke worker private IPs as targets (cross-VPC via TGW)
-resource "aws_lb_target_group_attachment" "public_http_workers" {
-  count             = var.worker_count
-  target_group_arn  = aws_lb_target_group.public_http.arn
-  target_id         = aws_instance.k3s_workers[count.index].private_ip
-  port              = 30080
-  availability_zone = aws_instance.k3s_workers[count.index].availability_zone
-}
-
+# Register spoke worker private IPs as HTTPS targets (cross-VPC via TGW)
 resource "aws_lb_target_group_attachment" "public_https_workers" {
   count             = var.worker_count
   target_group_arn  = aws_lb_target_group.public_https.arn
@@ -484,15 +572,7 @@ resource "aws_lb_target_group_attachment" "public_https_workers" {
   availability_zone = aws_instance.k3s_workers[count.index].availability_zone
 }
 
-# Register spoke master private IPs as targets (cross-VPC via TGW)
-resource "aws_lb_target_group_attachment" "public_http_masters" {
-  count             = var.master_count
-  target_group_arn  = aws_lb_target_group.public_http.arn
-  target_id         = aws_instance.k3s_masters[count.index].private_ip
-  port              = 30080
-  availability_zone = aws_instance.k3s_masters[count.index].availability_zone
-}
-
+# Register spoke master private IPs as HTTPS targets (cross-VPC via TGW)
 resource "aws_lb_target_group_attachment" "public_https_masters" {
   count             = var.master_count
   target_group_arn  = aws_lb_target_group.public_https.arn
@@ -501,26 +581,132 @@ resource "aws_lb_target_group_attachment" "public_https_masters" {
   availability_zone = aws_instance.k3s_masters[count.index].availability_zone
 }
 
-# HTTP listener (port 80)
+# HTTP listener - redirect to HTTPS
 resource "aws_lb_listener" "public_http" {
   load_balancer_arn = aws_lb.public_ingress.arn
   port              = "80"
-  protocol          = "TCP"
+  protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.public_http.arn
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
   }
 }
 
-# HTTPS listener (port 443)
+# HTTPS listener - terminate TLS with ACM, forward HTTPS to Istio
 resource "aws_lb_listener" "public_https" {
   load_balancer_arn = aws_lb.public_ingress.arn
   port              = "443"
-  protocol          = "TCP"
+  protocol          = "HTTPS"
+  certificate_arn   = aws_acm_certificate.wildcard[0].arn
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
 
   default_action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Access Denied"
+      status_code  = "403"
+    }
+  }
+
+  depends_on = [aws_acm_certificate_validation.wildcard]
+}
+
+# Listener rule: Forward if Cloudflare header present
+resource "aws_lb_listener_rule" "cloudflare_header_validation" {
+  count        = var.enable_cloudflare_restriction && var.domain_name != "" ? 1 : 0
+  listener_arn = aws_lb_listener.public_https.arn
+  priority     = 100
+
+  action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.public_https.arn
   }
+
+  condition {
+    http_header {
+      http_header_name = "X-Cloudflare-Zone-Id"
+      values           = [data.cloudflare_zone.main[0].id]
+    }
+  }
 }
+
+# Listener rule: Forward all if restriction disabled
+resource "aws_lb_listener_rule" "allow_all" {
+  count        = var.enable_cloudflare_restriction ? 0 : 1
+  listener_arn = aws_lb_listener.public_https.arn
+  priority     = 200
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.public_https.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/*"]
+    }
+  }
+}
+
+# Cloudflare DNS records
+resource "cloudflare_dns_record" "wildcard" {
+  count   = var.domain_name != "" ? 1 : 0
+  zone_id = data.cloudflare_zone.main[0].id
+  name    = "*"
+  content = aws_lb.public_ingress.dns_name
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
+resource "cloudflare_dns_record" "root" {
+  count   = var.domain_name != "" && var.subdomain_prefix == "" ? 1 : 0
+  zone_id = data.cloudflare_zone.main[0].id
+  name    = "@"
+  content = aws_lb.public_ingress.dns_name
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
+resource "cloudflare_dns_record" "www" {
+  count   = var.domain_name != "" && var.subdomain_prefix == "" ? 1 : 0
+  zone_id = data.cloudflare_zone.main[0].id
+  name    = "www"
+  content = aws_lb.public_ingress.dns_name
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
+# Cloudflare Transform Rule for header validation
+resource "cloudflare_ruleset" "transform_add_header" {
+  count   = var.enable_cloudflare_restriction && var.domain_name != "" ? 1 : 0
+  zone_id = data.cloudflare_zone.main[0].id
+  name    = "${var.env}-add-zone-header"
+  kind    = "zone"
+  phase   = "http_request_late_transform"
+
+  rules = [{
+    ref         = "add_zone_id_header"
+    description = "Add X-Cloudflare-Zone-Id header for ALB validation"
+    expression  = var.subdomain_prefix == "" ? "(http.host eq \"${var.domain_name}\" or http.host eq \"www.${var.domain_name}\" or http.host wildcard \"*.${var.domain_name}\")" : "(http.host wildcard \"*.${var.subdomain_prefix}.${var.domain_name}\")"
+    action      = "rewrite"
+    
+    action_parameters = {
+      headers = {
+        "X-Cloudflare-Zone-Id" = {
+          operation = "set"
+          value     = data.cloudflare_zone.main[0].id
+        }
+      }
+    }
+  }]
+}
+

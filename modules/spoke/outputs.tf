@@ -27,3 +27,19 @@ output "public_nlb_arn" {
   description = "ARN of the public NLB in hub VPC"
   value       = aws_lb.public_ingress.arn
 }
+
+output "acm_certificate_arn" {
+  description = "ARN of the ACM wildcard certificate (empty if no domain configured)"
+  value       = var.domain_name != "" ? aws_acm_certificate.wildcard[0].arn : ""
+}
+
+output "domain_name" {
+  description = "Domain name configured for this spoke (empty if not configured)"
+  value       = var.domain_name
+}
+
+output "wildcard_domain" {
+  description = "Wildcard domain for applications (empty if not configured)"
+  value       = var.domain_name != "" ? "*.${var.domain_name}" : ""
+}
+
