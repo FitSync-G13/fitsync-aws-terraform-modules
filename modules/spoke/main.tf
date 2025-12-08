@@ -1,6 +1,7 @@
-# GitHub Actions OIDC Provider
+# GitHub Actions OIDC Provider - create only for prod-spoke, others use existing
 resource "aws_iam_openid_connect_provider" "github_actions" {
-  url = "https://token.actions.githubusercontent.com"
+  count = var.env == "prod-spoke" ? 1 : 0
+  url   = "https://token.actions.githubusercontent.com"
 
   client_id_list = [
     "sts.amazonaws.com",
@@ -16,6 +17,15 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
   })
 }
 
+data "aws_iam_openid_connect_provider" "github_actions" {
+  count = var.env != "prod-spoke" ? 1 : 0
+  url   = "https://token.actions.githubusercontent.com"
+}
+
+locals {
+  oidc_provider_arn = var.env == "prod-spoke" ? aws_iam_openid_connect_provider.github_actions[0].arn : data.aws_iam_openid_connect_provider.github_actions[0].arn
+}
+
 # IAM Role for GitHub Actions
 resource "aws_iam_role" "github_actions" {
   name = "${var.project_name}-${var.env}-github-actions-role"
@@ -26,7 +36,7 @@ resource "aws_iam_role" "github_actions" {
       {
         Effect = "Allow"
         Principal = {
-          Federated = aws_iam_openid_connect_provider.github_actions.arn
+          Federated = local.oidc_provider_arn
         }
         Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
@@ -527,6 +537,13 @@ resource "github_actions_environment_variable" "subdomain_prefix" {
   value           = var.subdomain_prefix
 }
 
+resource "github_actions_environment_variable" "alb_dns_name" {
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "ALB_DNS_NAME"
+  value         = aws_lb.public_ingress.dns_name
+}
+
 resource "github_actions_environment_variable" "cert_email" {
   count           = var.domain_name != "" ? 1 : 0
   repository      = split("/", var.github_repo)[1]
@@ -626,9 +643,9 @@ resource "aws_vpc_security_group_egress_rule" "alb_all" {
 # ACM Certificate for ALB
 resource "aws_acm_certificate" "wildcard" {
   count             = var.domain_name != "" ? 1 : 0
-  domain_name       = "*.${var.domain_name}"
+  domain_name       = var.subdomain_prefix == "" ? "*.${var.domain_name}" : "*.${var.subdomain_prefix}.${var.domain_name}"
   validation_method = "DNS"
-  subject_alternative_names = [var.domain_name]
+  subject_alternative_names = var.subdomain_prefix == "" ? [var.domain_name] : ["${var.subdomain_prefix}.${var.domain_name}"]
 
   lifecycle {
     create_before_destroy = true
@@ -649,30 +666,33 @@ data "cloudflare_zone" "main" {
 }
 
 # Cloudflare DNS records for ACM validation
+# First validation record (always created)
 resource "cloudflare_dns_record" "cert_validation" {
-  for_each = var.domain_name != "" ? {
-    for dvo in distinct([
-      for d in aws_acm_certificate.wildcard[0].domain_validation_options : {
-        name   = d.resource_record_name
-        record = d.resource_record_value
-        type   = d.resource_record_type
-      }
-    ]) : dvo.name => dvo
-  } : {}
+  count = var.domain_name != "" ? 1 : 0
 
   zone_id = data.cloudflare_zone.main[0].id
-  name    = trimsuffix(each.value.name, ".")
-  content = trimsuffix(each.value.record, ".")
-  type    = each.value.type
+  name    = trimsuffix(tolist(aws_acm_certificate.wildcard[0].domain_validation_options)[0].resource_record_name, ".")
+  content = trimsuffix(tolist(aws_acm_certificate.wildcard[0].domain_validation_options)[0].resource_record_value, ".")
+  type    = tolist(aws_acm_certificate.wildcard[0].domain_validation_options)[0].resource_record_type
   ttl     = 60
   proxied = false
 }
 
 # ACM Certificate validation
 resource "aws_acm_certificate_validation" "wildcard" {
-  count                   = var.domain_name != "" ? 1 : 0
-  certificate_arn         = aws_acm_certificate.wildcard[0].arn
-  validation_record_fqdns = [for record in cloudflare_dns_record.cert_validation : record.name]
+  count           = var.domain_name != "" ? 1 : 0
+  certificate_arn = aws_acm_certificate.wildcard[0].arn
+  
+  # Don't specify validation_record_fqdns - let AWS handle it automatically
+  # The DNS records are created above and AWS will detect them
+
+  depends_on = [
+    cloudflare_dns_record.cert_validation
+  ]
+
+  timeouts {
+    create = "45m"
+  }
 }
 
 # Target group for HTTPS backend (ALB -> Istio HTTPS on 30443)
@@ -795,7 +815,7 @@ resource "aws_lb_listener_rule" "allow_all" {
 resource "cloudflare_dns_record" "wildcard" {
   count   = var.domain_name != "" ? 1 : 0
   zone_id = data.cloudflare_zone.main[0].id
-  name    = "*"
+  name    = var.subdomain_prefix == "" ? "*" : "*.${var.subdomain_prefix}"
   content = aws_lb.public_ingress.dns_name
   type    = "CNAME"
   ttl     = 1
@@ -812,6 +832,16 @@ resource "cloudflare_dns_record" "root" {
   proxied = true
 }
 
+resource "cloudflare_dns_record" "subdomain_root" {
+  count   = var.domain_name != "" && var.subdomain_prefix != "" ? 1 : 0
+  zone_id = data.cloudflare_zone.main[0].id
+  name    = var.subdomain_prefix
+  content = aws_lb.public_ingress.dns_name
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
 resource "cloudflare_dns_record" "www" {
   count   = var.domain_name != "" && var.subdomain_prefix == "" ? 1 : 0
   zone_id = data.cloudflare_zone.main[0].id
@@ -822,9 +852,9 @@ resource "cloudflare_dns_record" "www" {
   proxied = true
 }
 
-# Cloudflare Transform Rule for header validation
+# Cloudflare Transform Rule for header validation (only for prod-spoke)
 resource "cloudflare_ruleset" "transform_add_header" {
-  count   = var.enable_cloudflare_restriction && var.domain_name != "" ? 1 : 0
+  count   = var.enable_cloudflare_restriction && var.domain_name != "" && var.env == "prod-spoke" ? 1 : 0
   zone_id = data.cloudflare_zone.main[0].id
   name    = "${var.env}-add-zone-header"
   kind    = "zone"
@@ -833,7 +863,7 @@ resource "cloudflare_ruleset" "transform_add_header" {
   rules = [{
     ref         = "add_zone_id_header"
     description = "Add X-Cloudflare-Zone-Id header for ALB validation"
-    expression  = var.subdomain_prefix == "" ? "(http.host eq \"${var.domain_name}\" or http.host eq \"www.${var.domain_name}\" or http.host wildcard \"*.${var.domain_name}\")" : "(http.host wildcard \"*.${var.subdomain_prefix}.${var.domain_name}\")"
+    expression  = "(http.host eq \"${var.domain_name}\" or http.host eq \"www.${var.domain_name}\" or http.host wildcard \"*.${var.domain_name}\")"
     action      = "rewrite"
     
     action_parameters = {
