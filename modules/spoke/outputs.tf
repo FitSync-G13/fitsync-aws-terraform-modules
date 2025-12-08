@@ -18,7 +18,7 @@ output "db_private_ips" {
   value       = aws_instance.databases[*].private_ip
 }
 
-output "public_nlb_dns" {
+output "public_alb_dns" {
   description = "DNS name of the public NLB in hub VPC"
   value       = aws_lb.public_ingress.dns_name
 }
@@ -41,4 +41,14 @@ output "domain_name" {
 output "wildcard_domain" {
   description = "Wildcard domain for applications (empty if not configured)"
   value       = var.domain_name != "" ? "*.${var.domain_name}" : ""
+}
+
+output "db_private_dns" {
+  description = "Private DNS name for database instance (empty if not configured)"
+  value       = var.domain_name != "" && var.db_count > 0 ? local.db_fqdn : ""
+}
+
+output "db_private_zone_id" {
+  description = "Route53 private hosted zone ID for database (empty if not configured)"
+  value       = var.domain_name != "" && var.db_count > 0 ? aws_route53_zone.db_private[0].zone_id : ""
 }

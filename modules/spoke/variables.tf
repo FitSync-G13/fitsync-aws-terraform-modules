@@ -160,3 +160,9 @@ variable "acm_certificate_validation_method" {
   type        = string
   default     = "DNS"
 }
+
+variable "db_subdomain_prefix" {
+  description = "Subdomain prefix for database private DNS (e.g., 'fitsync-db' creates fitsync-db.fitsync.online)"
+  type        = string
+  default     = ""
+}

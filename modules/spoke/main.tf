@@ -552,6 +552,14 @@ resource "github_actions_environment_variable" "cert_email" {
   value           = var.cloudflare_email
 }
 
+resource "github_actions_environment_variable" "db_private_dns" {
+  count           = var.domain_name != "" && var.db_count > 0 ? 1 : 0
+  repository      = split("/", var.github_repo)[1]
+  environment     = github_repository_environment.deployment_env.environment
+  variable_name   = "DB_PRIVATE_DNS"
+  value           = local.db_fqdn
+}
+
 resource "github_actions_environment_secret" "cloudflare_api_token" {
   count           = var.domain_name != "" && (var.cloudflare_api_token != "" || var.cloudflare_api_key != "") ? 1 : 0
   repository      = split("/", var.github_repo)[1]
@@ -875,4 +883,28 @@ resource "cloudflare_ruleset" "transform_add_header" {
       }
     }
   }]
+}
+
+# Private Hosted Zone for Database
+resource "aws_route53_zone" "db_private" {
+  count = var.domain_name != "" && var.db_count > 0 ? 1 : 0
+  name  = var.domain_name
+
+  vpc {
+    vpc_id = aws_vpc.spoke.id
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-db-private-zone"
+  })
+}
+
+# DNS Record for Database Instance
+resource "aws_route53_record" "db" {
+  count   = var.domain_name != "" && var.db_count > 0 ? 1 : 0
+  zone_id = aws_route53_zone.db_private[0].zone_id
+  name    = local.db_fqdn
+  type    = "A"
+  ttl     = 300
+  records = [aws_instance.databases[0].private_ip]
 }

@@ -8,6 +8,10 @@ locals {
     for i in range(length(local.azs)) : cidrsubnet(var.vpc_cidr, 8, i + 1)
   ]
 
+  # Database FQDN
+  db_subdomain = var.db_subdomain_prefix != "" ? var.db_subdomain_prefix : "${var.project_name}-db"
+  db_fqdn      = var.subdomain_prefix != "" ? "${local.db_subdomain}.${var.subdomain_prefix}.${var.domain_name}" : "${local.db_subdomain}.${var.domain_name}"
+
   common_tags = {
     Terraform = "true"
     Project   = var.project_name
