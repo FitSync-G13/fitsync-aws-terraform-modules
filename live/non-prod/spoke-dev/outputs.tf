@@ -18,7 +18,7 @@ output "db_private_ips" {
   value       = module.spoke.db_private_ips
 }
 
-output "public_nlb_dns" {
+output "public_alb_dns" {
   description = "Public NLB DNS for internet access"
-  value       = module.spoke.public_nlb_dns
+  value       = module.spoke.public_alb_dns
 }
