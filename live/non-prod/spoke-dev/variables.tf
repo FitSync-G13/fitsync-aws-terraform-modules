@@ -150,3 +150,51 @@ variable "acm_certificate_validation_method" {
   type        = string
   default     = "DNS"
 }
+
+variable "opensearch_master_count" {
+  description = "Number of OpenSearch master nodes"
+  type        = number
+  default     = 1
+}
+
+variable "opensearch_worker_count" {
+  description = "Number of OpenSearch worker nodes"
+  type        = number
+  default     = 1
+}
+
+variable "opensearch_master_instance_type" {
+  description = "Instance type for OpenSearch master nodes"
+  type        = string
+  default     = "t3.medium"
+}
+
+variable "opensearch_worker_instance_type" {
+  description = "Instance type for OpenSearch worker nodes"
+  type        = string
+  default     = "t3.medium"
+}
+
+variable "opensearch_vol_size" {
+  description = "Size of OpenSearch EBS volume in GB"
+  type        = number
+  default     = 50
+}
+
+variable "enable_ebs_backup" {
+  description = "Enable AWS Backup for EBS volumes"
+  type        = bool
+  default     = true
+}
+
+variable "backup_retention_days" {
+  description = "Number of days to retain backups"
+  type        = number
+  default     = 7
+}
+
+variable "backup_schedule" {
+  description = "Cron expression for backup schedule (default: daily at 2 AM UTC)"
+  type        = string
+  default     = "cron(0 2 * * ? *)"
+}

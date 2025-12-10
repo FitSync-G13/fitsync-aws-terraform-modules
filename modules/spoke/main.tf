@@ -405,6 +405,51 @@ resource "aws_volume_attachment" "db_attachments" {
   instance_id = aws_instance.databases[count.index].id
 }
 
+# OpenSearch Master Instances
+resource "aws_instance" "opensearch_masters" {
+  count                  = var.opensearch_master_count
+  ami                    = data.aws_ssm_parameter.ami.value
+  instance_type          = var.opensearch_master_instance_type
+  key_name               = aws_key_pair.main.key_name
+  vpc_security_group_ids = [aws_security_group.cluster.id]
+  subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-opensearch-master-${count.index + 1}"
+    Role = "opensearch-master"
+  })
+}
+
+# OpenSearch Worker Instances
+resource "aws_instance" "opensearch_workers" {
+  count                  = var.opensearch_worker_count
+  ami                    = data.aws_ssm_parameter.ami.value
+  instance_type          = var.opensearch_worker_instance_type
+  key_name               = aws_key_pair.main.key_name
+  vpc_security_group_ids = [aws_security_group.cluster.id]
+  subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-opensearch-worker-${count.index + 1}"
+    Role = "opensearch-worker"
+  })
+}
+
+# Single EBS Volume for OpenSearch Cluster (shared storage via CSI)
+resource "aws_ebs_volume" "opensearch_storage" {
+  count             = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  availability_zone = var.opensearch_master_count > 0 ? aws_instance.opensearch_masters[0].availability_zone : aws_instance.opensearch_workers[0].availability_zone
+  size              = var.opensearch_vol_size
+  type              = "gp3"
+
+  tags = merge(local.common_tags, {
+    Name        = "${var.project_name}-${var.env}-opensearch-storage"
+    ClusterRole = "opensearch-shared-storage"
+  })
+}
+
 # Network Load Balancer for K3s API
 resource "aws_lb" "k3s_api" {
   name               = "${var.project_name}-${var.env}-k3s-api-nlb"
@@ -521,6 +566,20 @@ resource "github_actions_environment_variable" "worker_count" {
   value           = tostring(var.worker_count)
 }
 
+resource "github_actions_environment_variable" "opensearch_master_count" {
+  repository      = split("/", var.github_repo)[1]
+  environment     = github_repository_environment.deployment_env.environment
+  variable_name   = "OPENSEARCH_MASTER_COUNT"
+  value           = tostring(var.opensearch_master_count)
+}
+
+resource "github_actions_environment_variable" "opensearch_worker_count" {
+  repository      = split("/", var.github_repo)[1]
+  environment     = github_repository_environment.deployment_env.environment
+  variable_name   = "OPENSEARCH_WORKER_COUNT"
+  value           = tostring(var.opensearch_worker_count)
+}
+
 resource "github_actions_environment_variable" "domain_name" {
   count           = var.domain_name != "" ? 1 : 0
   repository      = split("/", var.github_repo)[1]
@@ -558,6 +617,14 @@ resource "github_actions_environment_variable" "db_private_dns" {
   environment     = github_repository_environment.deployment_env.environment
   variable_name   = "DB_PRIVATE_DNS"
   value           = local.db_fqdn
+}
+
+resource "github_actions_environment_variable" "opensearch_subdomain" {
+  count           = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
+  repository      = split("/", var.github_repo)[1]
+  environment     = github_repository_environment.deployment_env.environment
+  variable_name   = "OPENSEARCH_SUBDOMAIN"
+  value           = local.opensearch_fqdn
 }
 
 resource "github_actions_environment_secret" "cloudflare_api_token" {
@@ -907,4 +974,87 @@ resource "aws_route53_record" "db" {
   type    = "A"
   ttl     = 300
   records = [aws_instance.databases[0].private_ip]
+}
+
+# AWS Backup Vault
+resource "aws_backup_vault" "main" {
+  count = var.enable_ebs_backup ? 1 : 0
+  name  = "${var.project_name}-${var.env}-backup-vault"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-backup-vault"
+  })
+}
+
+# AWS Backup Plan
+resource "aws_backup_plan" "ebs_backup" {
+  count = var.enable_ebs_backup ? 1 : 0
+  name  = "${var.project_name}-${var.env}-ebs-backup-plan"
+
+  rule {
+    rule_name         = "daily_backup"
+    target_vault_name = aws_backup_vault.main[0].name
+    schedule          = var.backup_schedule
+
+    lifecycle {
+      delete_after = var.backup_retention_days
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-ebs-backup-plan"
+  })
+}
+
+# IAM Role for AWS Backup
+resource "aws_iam_role" "backup" {
+  count = var.enable_ebs_backup ? 1 : 0
+  name  = "${var.project_name}-${var.env}-backup-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "backup.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-backup-role"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "backup" {
+  count      = var.enable_ebs_backup ? 1 : 0
+  role       = aws_iam_role.backup[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+}
+
+resource "aws_iam_role_policy_attachment" "backup_restore" {
+  count      = var.enable_ebs_backup ? 1 : 0
+  role       = aws_iam_role.backup[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
+}
+
+# Backup Selection for Database Volumes
+resource "aws_backup_selection" "db_volumes" {
+  count        = var.enable_ebs_backup && var.db_count > 0 ? 1 : 0
+  name         = "${var.project_name}-${var.env}-db-volumes"
+  iam_role_arn = aws_iam_role.backup[0].arn
+  plan_id      = aws_backup_plan.ebs_backup[0].id
+
+  resources = aws_ebs_volume.db_volumes[*].arn
+}
+
+# Backup Selection for OpenSearch Storage Volume
+resource "aws_backup_selection" "opensearch_storage" {
+  count        = var.enable_ebs_backup && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
+  name         = "${var.project_name}-${var.env}-opensearch-storage"
+  iam_role_arn = aws_iam_role.backup[0].arn
+  plan_id      = aws_backup_plan.ebs_backup[0].id
+
+  resources = [aws_ebs_volume.opensearch_storage[0].arn]
 }

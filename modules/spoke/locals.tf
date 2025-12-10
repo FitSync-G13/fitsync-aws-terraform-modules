@@ -12,6 +12,10 @@ locals {
   db_subdomain = var.db_subdomain_prefix != "" ? var.db_subdomain_prefix : "${var.project_name}-db"
   db_fqdn      = var.subdomain_prefix != "" ? "${local.db_subdomain}.${var.subdomain_prefix}.${var.domain_name}" : "${local.db_subdomain}.${var.domain_name}"
 
+  # OpenSearch FQDN
+  opensearch_subdomain = var.subdomain_prefix != "" ? "${var.subdomain_prefix}-opensearch" : "opensearch"
+  opensearch_fqdn      = "${local.opensearch_subdomain}.${var.domain_name}"
+
   common_tags = {
     Terraform = "true"
     Project   = var.project_name

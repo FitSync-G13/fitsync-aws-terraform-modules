@@ -17,6 +17,14 @@ module "spoke" {
   master_instance_type              = var.master_instance_type
   worker_instance_type              = var.worker_instance_type
   db_instance_type                  = var.db_instance_type
+  opensearch_master_count           = var.opensearch_master_count
+  opensearch_worker_count           = var.opensearch_worker_count
+  opensearch_master_instance_type   = var.opensearch_master_instance_type
+  opensearch_worker_instance_type   = var.opensearch_worker_instance_type
+  opensearch_vol_size               = var.opensearch_vol_size
+  enable_ebs_backup                 = var.enable_ebs_backup
+  backup_retention_days             = var.backup_retention_days
+  backup_schedule                   = var.backup_schedule
   public_key_path                   = var.public_key_path
   ssm_parameter_name                = var.ssm_parameter_name
   github_repo                       = var.github_repo

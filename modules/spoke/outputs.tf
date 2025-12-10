@@ -52,3 +52,18 @@ output "db_private_zone_id" {
   description = "Route53 private hosted zone ID for database (empty if not configured)"
   value       = var.domain_name != "" && var.db_count > 0 ? aws_route53_zone.db_private[0].zone_id : ""
 }
+
+output "opensearch_master_private_ips" {
+  description = "Private IP addresses of OpenSearch master nodes"
+  value       = aws_instance.opensearch_masters[*].private_ip
+}
+
+output "opensearch_worker_private_ips" {
+  description = "Private IP addresses of OpenSearch worker nodes"
+  value       = aws_instance.opensearch_workers[*].private_ip
+}
+
+output "opensearch_subdomain" {
+  description = "OpenSearch subdomain FQDN (empty if not configured)"
+  value       = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? local.opensearch_fqdn : ""
+}
