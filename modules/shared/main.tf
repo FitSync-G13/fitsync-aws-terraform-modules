@@ -1,6 +1,6 @@
 resource "aws_ecr_repository" "main" {
-  count                = var.enable_deletion_protection ? 0 : 1
-  name                 = local.repository_name
+  for_each             = var.enable_deletion_protection ? toset([]) : toset(local.repository_names)
+  name                 = each.value
   image_tag_mutability = "MUTABLE"
   force_delete         = true
 
@@ -13,13 +13,14 @@ resource "aws_ecr_repository" "main" {
   }
 
   tags = merge(local.common_tags, {
-    Name = local.repository_name
+    Name    = each.value
+    Service = split("-", each.value)[1]
   })
 }
 
 resource "aws_ecr_repository" "main_protected" {
-  count                = var.enable_deletion_protection ? 1 : 0
-  name                 = local.repository_name
+  for_each             = var.enable_deletion_protection ? toset(local.repository_names) : toset([])
+  name                 = each.value
   image_tag_mutability = "MUTABLE"
   force_delete         = false
 
@@ -32,7 +33,8 @@ resource "aws_ecr_repository" "main_protected" {
   }
 
   tags = merge(local.common_tags, {
-    Name = local.repository_name
+    Name    = each.value
+    Service = split("-", each.value)[1]
   })
 
   lifecycle {
@@ -41,7 +43,8 @@ resource "aws_ecr_repository" "main_protected" {
 }
 
 resource "aws_ecr_lifecycle_policy" "main" {
-  repository = local.repository_name
+  for_each   = toset(local.repository_names)
+  repository = each.value
 
   policy = jsonencode({
     rules = [
@@ -65,7 +68,8 @@ resource "aws_ecr_lifecycle_policy" "main" {
 }
 
 resource "aws_ecr_repository_policy" "main" {
-  repository = local.repository_name
+  for_each   = toset(local.repository_names)
+  repository = each.value
 
   policy = jsonencode({
     Version = "2012-10-17"

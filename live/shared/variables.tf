@@ -9,12 +9,18 @@ variable "enable_deletion_protection" {
   default     = true
 }
 
+variable "env" {
+  description = "Environment name"
+  type        = string
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string
 }
 
-variable "env" {
-  description = "Environment name"
-  type        = string
+variable "service_names" {
+  description = "List of service names for ECR repositories"
+  type        = list(string)
+  default     = ["ecr"]
 }

@@ -1,5 +1,5 @@
 locals {
-  repository_name = "${var.project_name}-ecr"
+  repository_names = [for service in var.service_names : "${var.project_name}-${service}"]
 
   common_tags = {
     Terraform = "true"

@@ -18,3 +18,9 @@ variable "aws_region" {
   description = "AWS region"
   type        = string
 }
+
+variable "service_names" {
+  description = "List of service names for ECR repositories"
+  type        = list(string)
+  default     = ["ecr"]
+}

@@ -98,6 +98,20 @@ resource "aws_iam_role_policy" "github_actions_policy" {
           "elasticloadbalancing:DescribeLoadBalancers"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:CreateSecret",
+          "secretsmanager:UpdateSecret",
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:ListSecrets",
+          "secretsmanager:TagResource"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${var.project_name}/${var.deployment_environment}/*"
+        ]
       }
     ]
   })
