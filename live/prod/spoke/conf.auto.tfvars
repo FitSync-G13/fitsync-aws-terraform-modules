@@ -20,5 +20,15 @@ github_repo                     = "FitSync-G13/fitsync-cd"
 deployment_environment          = "production"
 domain_name                     = "fitsync.online"
 subdomain_prefix                = "api"
-db_subdomain_prefix             = ""
+db_subdomain_prefix             = "db1"
 enable_deletion_protection      = false
+
+# CI Repositories that need ECR access
+ci_repositories = [
+  "FitSync-G13/fitsync-user-service",
+  "FitSync-G13/fitsync-training-service",
+  "FitSync-G13/fitsync-schedule-service",
+  "FitSync-G13/fitsync-progress-service",
+  "FitSync-G13/fitsync-api-gateway",
+  "FitSync-G13/fitsync-notification-service"
+]

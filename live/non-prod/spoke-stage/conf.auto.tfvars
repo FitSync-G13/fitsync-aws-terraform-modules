@@ -22,3 +22,13 @@ domain_name                = "fitsync.online"
 subdomain_prefix           = "stage"
 db_subdomain_prefix        = ""
 enable_deletion_protection = false
+
+# CI Repositories that need ECR access
+ci_repositories = [
+  "FitSync-G13/fitsync-user-service",
+  "FitSync-G13/fitsync-training-service", 
+  "FitSync-G13/fitsync-schedule-service",
+  "FitSync-G13/fitsync-progress-service",
+  "FitSync-G13/fitsync-api-gateway",
+  "FitSync-G13/fitsync-notification-service"
+]

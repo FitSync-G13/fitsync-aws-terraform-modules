@@ -204,3 +204,9 @@ variable "db_subdomain_prefix" {
   type        = string
   default     = ""
 }
+
+variable "ci_repositories" {
+  description = "List of CI repositories that need ECR access (format: owner/repo-name)"
+  type        = list(string)
+  default     = []
+}

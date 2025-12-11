@@ -1,3 +1,9 @@
+# Data source for ECR repository URLs from shared module
+data "aws_ecr_repository" "shared_repositories" {
+  for_each = toset(["user-service", "training-service", "schedule-service", "progress-service", "notification-service", "api-gateway", "frontend"])
+  name     = "${var.project_name}-${each.value}"
+}
+
 # GitHub Actions OIDC Provider - create only for prod-spoke, others use existing
 resource "aws_iam_openid_connect_provider" "github_actions" {
   count = var.env == "prod-spoke" ? 1 : 0
@@ -53,6 +59,65 @@ resource "aws_iam_role" "github_actions" {
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-github-actions-role"
+  })
+}
+
+# IAM Roles for CI Repositories (ECR Push Access)
+resource "aws_iam_role" "ci_github_actions" {
+  for_each = toset(var.ci_repositories)
+  name     = "${var.project_name}-${var.env}-ci-${replace(split("/", each.value)[1], "-", "")}-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = local.oidc_provider_arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = "repo:${each.value}:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-ci-${replace(split("/", each.value)[1], "-", "")}-role"
+    Type = "CI"
+  })
+}
+
+# ECR Push Policy for CI Repositories
+resource "aws_iam_role_policy" "ci_ecr_push" {
+  for_each = toset(var.ci_repositories)
+  name     = "${var.project_name}-${var.env}-ci-ecr-push-policy"
+  role     = aws_iam_role.ci_github_actions[each.value].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage"
+        ]
+        Resource = "*"
+      }
+    ]
   })
 }
 
@@ -1114,4 +1179,35 @@ resource "aws_secretsmanager_secret" "jwt_refresh_secret" {
 resource "aws_secretsmanager_secret_version" "jwt_refresh_secret" {
   secret_id     = aws_secretsmanager_secret.jwt_refresh_secret.id
   secret_string = random_password.jwt_refresh_secret.result
+}
+
+# CI Repository Environments and Secrets for ECR Access
+resource "github_repository_environment" "ci_deployment_env" {
+  for_each    = toset(var.ci_repositories)
+  repository  = split("/", each.value)[1]
+  environment = var.deployment_environment
+}
+
+resource "github_actions_environment_secret" "ci_aws_role_arn" {
+  for_each        = toset(var.ci_repositories)
+  repository      = split("/", each.value)[1]
+  environment     = github_repository_environment.ci_deployment_env[each.value].environment
+  secret_name     = "AWS_ROLE_ARN"
+  plaintext_value = aws_iam_role.ci_github_actions[each.value].arn
+}
+
+resource "github_actions_environment_variable" "ci_ecr_registry" {
+  for_each      = toset(var.ci_repositories)
+  repository    = split("/", each.value)[1]
+  environment   = github_repository_environment.ci_deployment_env[each.value].environment
+  variable_name = "ECR_REGISTRY"
+  value         = split("/", data.aws_ecr_repository.shared_repositories["user-service"].repository_url)[0]
+}
+
+resource "github_actions_environment_variable" "ci_aws_region" {
+  for_each      = toset(var.ci_repositories)
+  repository    = split("/", each.value)[1]
+  environment   = github_repository_environment.ci_deployment_env[each.value].environment
+  variable_name = "AWS_REGION"
+  value         = var.aws_region
 }

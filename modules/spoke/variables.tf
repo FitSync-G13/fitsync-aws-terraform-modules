@@ -105,6 +105,12 @@ variable "github_repo" {
   type        = string
 }
 
+variable "ci_repositories" {
+  description = "List of CI repositories that need ECR access (format: owner/repo-name)"
+  type        = list(string)
+  default     = []
+}
+
 variable "github_token" {
   description = "GitHub personal access token for managing secrets"
   type        = string

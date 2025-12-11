@@ -39,4 +39,5 @@ module "spoke" {
   cloudflare_email                  = var.cloudflare_email
   enable_cloudflare_restriction     = var.enable_cloudflare_restriction
   acm_certificate_validation_method = var.acm_certificate_validation_method
+  ci_repositories                   = var.ci_repositories
 }
