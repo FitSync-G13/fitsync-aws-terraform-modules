@@ -20,4 +20,5 @@ github_repo                     = "FitSync-G13/fitsync-cd"
 deployment_environment          = "development"
 domain_name                     = "fitsync.online"
 subdomain_prefix                = "dev-api"
+db_subdomain_prefix             = "db2"
 enable_deletion_protection      = false

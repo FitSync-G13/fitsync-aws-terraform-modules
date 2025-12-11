@@ -198,3 +198,9 @@ variable "backup_schedule" {
   type        = string
   default     = "cron(0 2 * * ? *)"
 }
+
+variable "db_subdomain_prefix" {
+  description = "Subdomain prefix for database private DNS (e.g., 'fitsync-db' creates fitsync-db.fitsync.online)"
+  type        = string
+  default     = ""
+}

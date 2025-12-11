@@ -33,6 +33,7 @@ module "spoke" {
   enable_deletion_protection        = var.enable_deletion_protection
   domain_name                       = var.domain_name
   subdomain_prefix                  = var.subdomain_prefix
+  db_subdomain_prefix               = var.db_subdomain_prefix
   cloudflare_api_token              = var.cloudflare_api_token
   cloudflare_api_key                = var.cloudflare_api_key
   cloudflare_email                  = var.cloudflare_email

@@ -20,4 +20,5 @@ github_repo                = "FitSync-G13/fitsync-cd"
 deployment_environment     = "staging"
 domain_name                = "fitsync.online"
 subdomain_prefix           = "stage"
+db_subdomain_prefix        = ""
 enable_deletion_protection = false
