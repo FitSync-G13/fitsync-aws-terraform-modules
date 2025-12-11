@@ -1072,3 +1072,46 @@ resource "aws_backup_selection" "opensearch_storage" {
 
   resources = [aws_ebs_volume.opensearch_storage[0].arn]
 }
+
+# Generate JWT secrets
+resource "random_password" "jwt_secret" {
+  length  = 64
+  special = true
+}
+
+resource "random_password" "jwt_refresh_secret" {
+  length  = 64
+  special = true
+}
+
+# Store JWT secret in AWS Secrets Manager
+resource "aws_secretsmanager_secret" "jwt_secret" {
+  name        = "${var.project_name}/${var.deployment_environment}/jwt-secret"
+  description = "JWT secret for ${var.deployment_environment} environment"
+
+  tags = merge(local.common_tags, {
+    Name    = "${var.project_name}-${var.env}-jwt-secret"
+    Service = "authentication"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "jwt_secret" {
+  secret_id     = aws_secretsmanager_secret.jwt_secret.id
+  secret_string = random_password.jwt_secret.result
+}
+
+# Store JWT refresh secret in AWS Secrets Manager
+resource "aws_secretsmanager_secret" "jwt_refresh_secret" {
+  name        = "${var.project_name}/${var.deployment_environment}/jwt-refresh-secret"
+  description = "JWT refresh secret for ${var.deployment_environment} environment"
+
+  tags = merge(local.common_tags, {
+    Name    = "${var.project_name}-${var.env}-jwt-refresh-secret"
+    Service = "authentication"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "jwt_refresh_secret" {
+  secret_id     = aws_secretsmanager_secret.jwt_refresh_secret.id
+  secret_string = random_password.jwt_refresh_secret.result
+}
