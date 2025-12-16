@@ -351,6 +351,12 @@ resource "aws_iam_role_policy_attachment" "ssm_managed" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# EBS CSI Driver permissions for OpenSearch storage
+resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
 resource "aws_iam_instance_profile" "ec2_profile" {
   name = "${var.project_name}-${var.env}-ec2-profile"
   role = aws_iam_role.ec2_role.name
@@ -395,6 +401,24 @@ resource "aws_security_group" "cluster" {
     protocol    = "tcp"
     cidr_blocks = [var.hub_vpc_cidr]
     description = "Istio ingress HTTPS NodePort from hub NLB"
+  }
+
+  # OpenSearch Dashboard NodePort from hub VPC (for ALB health checks and traffic)
+  ingress {
+    from_port   = 30601
+    to_port     = 30601
+    protocol    = "tcp"
+    cidr_blocks = [var.hub_vpc_cidr]
+    description = "OpenSearch Dashboard HTTPS NodePort from hub ALB"
+  }
+
+  # OpenSearch Service NodePort from hub VPC (for ALB health checks and traffic)
+  ingress {
+    from_port   = 30920
+    to_port     = 30920
+    protocol    = "tcp"
+    cidr_blocks = [var.hub_vpc_cidr]
+    description = "OpenSearch Service HTTPS NodePort from hub ALB"
   }
 
   # All traffic within VPC
@@ -516,7 +540,7 @@ resource "aws_instance" "opensearch_workers" {
   })
 }
 
-# Single EBS Volume for OpenSearch Cluster (shared storage via CSI)
+# Single EBS Volume for OpenSearch Cluster (managed via CSI)
 resource "aws_ebs_volume" "opensearch_storage" {
   count             = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
   availability_zone = var.opensearch_master_count > 0 ? aws_instance.opensearch_masters[0].availability_zone : aws_instance.opensearch_workers[0].availability_zone
@@ -526,7 +550,62 @@ resource "aws_ebs_volume" "opensearch_storage" {
   tags = merge(local.common_tags, {
     Name        = "${var.project_name}-${var.env}-opensearch-storage"
     ClusterRole = "opensearch-shared-storage"
+    CSIManaged  = "true"
   })
+}
+
+# Internal Load Balancer for OpenSearch
+resource "aws_lb" "opensearch_internal" {
+  count              = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  name               = "${var.project_name}-${var.env}-opensearch-nlb"
+  internal           = true
+  load_balancer_type = "network"
+  subnets            = aws_subnet.private[*].id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-opensearch-nlb"
+  })
+}
+
+resource "aws_lb_target_group" "opensearch" {
+  count    = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  name     = "${var.project_name}-${var.env}-opensearch-tg"
+  port     = 6443
+  protocol = "TCP"
+  vpc_id   = aws_vpc.spoke.id
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    port                = "traffic-port"
+    protocol            = "TCP"
+    timeout             = 10
+    unhealthy_threshold = 2
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-opensearch-k3s-api-tg"
+  })
+}
+
+resource "aws_lb_listener" "opensearch" {
+  count             = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  load_balancer_arn = aws_lb.opensearch_internal[0].arn
+  port              = "6443"
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.opensearch[0].arn
+  }
+}
+
+resource "aws_lb_target_group_attachment" "opensearch_masters" {
+  count            = var.opensearch_master_count
+  target_group_arn = aws_lb_target_group.opensearch[0].arn
+  target_id        = aws_instance.opensearch_masters[count.index].id
+  port             = 6443
 }
 
 # Network Load Balancer for K3s API
@@ -618,61 +697,61 @@ resource "github_actions_environment_variable" "hub_env" {
 
 # Spoke-specific variables
 resource "github_actions_environment_variable" "spoke_env" {
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "SPOKE_ENV"
-  value           = var.env
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "SPOKE_ENV"
+  value         = var.env
 }
 
 resource "github_actions_environment_variable" "vpc_cidr" {
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "VPC_CIDR"
-  value           = var.vpc_cidr
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "VPC_CIDR"
+  value         = var.vpc_cidr
 }
 
 resource "github_actions_environment_variable" "master_count" {
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "MASTER_COUNT"
-  value           = tostring(var.master_count)
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "MASTER_COUNT"
+  value         = tostring(var.master_count)
 }
 
 resource "github_actions_environment_variable" "worker_count" {
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "WORKER_COUNT"
-  value           = tostring(var.worker_count)
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "WORKER_COUNT"
+  value         = tostring(var.worker_count)
 }
 
 resource "github_actions_environment_variable" "opensearch_master_count" {
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "OPENSEARCH_MASTER_COUNT"
-  value           = tostring(var.opensearch_master_count)
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "OPENSEARCH_MASTER_COUNT"
+  value         = tostring(var.opensearch_master_count)
 }
 
 resource "github_actions_environment_variable" "opensearch_worker_count" {
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "OPENSEARCH_WORKER_COUNT"
-  value           = tostring(var.opensearch_worker_count)
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "OPENSEARCH_WORKER_COUNT"
+  value         = tostring(var.opensearch_worker_count)
 }
 
 resource "github_actions_environment_variable" "domain_name" {
-  count           = var.domain_name != "" ? 1 : 0
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "DOMAIN_NAME"
-  value           = var.domain_name
+  count         = var.domain_name != "" ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "DOMAIN_NAME"
+  value         = var.domain_name
 }
 
 resource "github_actions_environment_variable" "subdomain_prefix" {
-  count           = var.domain_name != "" && var.subdomain_prefix != "" ? 1 : 0
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "SUBDOMAIN_PREFIX"
-  value           = var.subdomain_prefix
+  count         = var.domain_name != "" && var.subdomain_prefix != "" ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "SUBDOMAIN_PREFIX"
+  value         = var.subdomain_prefix
 }
 
 resource "github_actions_environment_variable" "alb_dns_name" {
@@ -683,27 +762,51 @@ resource "github_actions_environment_variable" "alb_dns_name" {
 }
 
 resource "github_actions_environment_variable" "cert_email" {
-  count           = var.domain_name != "" ? 1 : 0
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "CERT_EMAIL"
-  value           = var.cloudflare_email
+  count         = var.domain_name != "" ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "CERT_EMAIL"
+  value         = var.cloudflare_email
 }
 
 resource "github_actions_environment_variable" "db_private_dns" {
-  count           = var.domain_name != "" && var.db_count > 0 ? 1 : 0
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "DB_PRIVATE_DNS"
-  value           = local.db_fqdn
+  count         = var.domain_name != "" && var.db_count > 0 ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "DB_PRIVATE_DNS"
+  value         = local.db_fqdn
 }
 
 resource "github_actions_environment_variable" "opensearch_subdomain" {
-  count           = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
-  repository      = split("/", var.github_repo)[1]
-  environment     = github_repository_environment.deployment_env.environment
-  variable_name   = "OPENSEARCH_SUBDOMAIN"
-  value           = local.opensearch_fqdn
+  count         = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "OPENSEARCH_SUBDOMAIN"
+  value         = local.opensearch_fqdn
+}
+
+resource "github_actions_environment_variable" "opensearch_ebs_volume_id" {
+  count         = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "OPENSEARCH_EBS_VOLUME_ID"
+  value         = aws_ebs_volume.opensearch_storage[0].id
+}
+
+resource "github_actions_environment_variable" "opensearch_nlb_dns" {
+  count         = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "OPENSEARCH_NLB_DNS"
+  value         = aws_lb.opensearch_internal[0].dns_name
+}
+
+resource "github_actions_environment_variable" "opensearch_dashboard_fqdn" {
+  count         = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "OPENSEARCH_DASHBOARD_FQDN"
+  value         = local.opensearch_dashboard_fqdn
 }
 
 resource "github_actions_environment_secret" "cloudflare_api_token" {
@@ -796,9 +899,9 @@ resource "aws_vpc_security_group_egress_rule" "alb_all" {
 
 # ACM Certificate for ALB
 resource "aws_acm_certificate" "wildcard" {
-  count             = var.domain_name != "" ? 1 : 0
-  domain_name       = var.subdomain_prefix == "" ? "*.${var.domain_name}" : "*.${var.subdomain_prefix}.${var.domain_name}"
-  validation_method = "DNS"
+  count                     = var.domain_name != "" ? 1 : 0
+  domain_name               = var.subdomain_prefix == "" ? "*.${var.domain_name}" : "*.${var.subdomain_prefix}.${var.domain_name}"
+  validation_method         = "DNS"
   subject_alternative_names = var.subdomain_prefix == "" ? [var.domain_name] : ["${var.subdomain_prefix}.${var.domain_name}"]
 
   lifecycle {
@@ -813,7 +916,7 @@ resource "aws_acm_certificate" "wildcard" {
 # Cloudflare Zone lookup
 data "cloudflare_zone" "main" {
   count = var.domain_name != "" ? 1 : 0
-  
+
   filter = {
     name = var.domain_name
   }
@@ -836,7 +939,7 @@ resource "cloudflare_dns_record" "cert_validation" {
 resource "aws_acm_certificate_validation" "wildcard" {
   count           = var.domain_name != "" ? 1 : 0
   certificate_arn = aws_acm_certificate.wildcard[0].arn
-  
+
   # Don't specify validation_record_fqdns - let AWS handle it automatically
   # The DNS records are created above and AWS will detect them
 
@@ -892,6 +995,94 @@ resource "aws_lb_target_group_attachment" "public_https_masters" {
   availability_zone = aws_instance.k3s_masters[count.index].availability_zone
 }
 
+# Target group for OpenSearch Dashboard HTTPS backend (ALB -> OpenSearch Dashboard HTTPS on 30601)
+resource "aws_lb_target_group" "opensearch_dashboard_https" {
+  count       = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  name        = "${var.project_name}-${var.env}-os-dash-https"
+  port        = 30601
+  protocol    = "HTTPS"
+  vpc_id      = data.aws_vpc.hub.id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    matcher             = "200"
+    path                = "/"
+    port                = "traffic-port"
+    protocol            = "HTTPS"
+    timeout             = 5
+    unhealthy_threshold = 2
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-opensearch-dashboard-https-tg"
+  })
+}
+
+# Register OpenSearch master private IPs as Dashboard HTTPS targets (cross-VPC via TGW)
+resource "aws_lb_target_group_attachment" "opensearch_dashboard_https_masters" {
+  count             = var.opensearch_master_count
+  target_group_arn  = aws_lb_target_group.opensearch_dashboard_https[0].arn
+  target_id         = aws_instance.opensearch_masters[count.index].private_ip
+  port              = 30601
+  availability_zone = aws_instance.opensearch_masters[count.index].availability_zone
+}
+
+# Register OpenSearch worker private IPs as Dashboard HTTPS targets (cross-VPC via TGW)
+resource "aws_lb_target_group_attachment" "opensearch_dashboard_https_workers" {
+  count             = var.opensearch_worker_count
+  target_group_arn  = aws_lb_target_group.opensearch_dashboard_https[0].arn
+  target_id         = aws_instance.opensearch_workers[count.index].private_ip
+  port              = 30601
+  availability_zone = aws_instance.opensearch_workers[count.index].availability_zone
+}
+
+# Target group for OpenSearch Service HTTPS backend (ALB -> OpenSearch Service HTTPS on 30920)
+resource "aws_lb_target_group" "opensearch_service_https" {
+  count       = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  name        = "${var.project_name}-${var.env}-os-svc-https"
+  port        = 30920
+  protocol    = "HTTPS"
+  vpc_id      = data.aws_vpc.hub.id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    matcher             = "200,401"
+    path                = "/"
+    port                = "traffic-port"
+    protocol            = "HTTPS"
+    timeout             = 5
+    unhealthy_threshold = 2
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-opensearch-service-https-tg"
+  })
+}
+
+# Register OpenSearch master private IPs as Service HTTPS targets (cross-VPC via TGW)
+resource "aws_lb_target_group_attachment" "opensearch_service_https_masters" {
+  count             = var.opensearch_master_count
+  target_group_arn  = aws_lb_target_group.opensearch_service_https[0].arn
+  target_id         = aws_instance.opensearch_masters[count.index].private_ip
+  port              = 30920
+  availability_zone = aws_instance.opensearch_masters[count.index].availability_zone
+}
+
+# Register OpenSearch worker private IPs as Service HTTPS targets (cross-VPC via TGW)
+resource "aws_lb_target_group_attachment" "opensearch_service_https_workers" {
+  count             = var.opensearch_worker_count
+  target_group_arn  = aws_lb_target_group.opensearch_service_https[0].arn
+  target_id         = aws_instance.opensearch_workers[count.index].private_ip
+  port              = 30920
+  availability_zone = aws_instance.opensearch_workers[count.index].availability_zone
+}
+
 # HTTP listener - redirect to HTTPS
 resource "aws_lb_listener" "public_http" {
   load_balancer_arn = aws_lb.public_ingress.arn
@@ -926,6 +1117,42 @@ resource "aws_lb_listener" "public_https" {
   }
 
   depends_on = [aws_acm_certificate_validation.wildcard]
+}
+
+# Listener rule: Forward OpenSearch Service traffic (private access for main cluster)
+resource "aws_lb_listener_rule" "opensearch_service" {
+  count        = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
+  listener_arn = aws_lb_listener.public_https.arn
+  priority     = 40
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.opensearch_service_https[0].arn
+  }
+
+  condition {
+    host_header {
+      values = [local.opensearch_fqdn]
+    }
+  }
+}
+
+# Listener rule: Forward OpenSearch Dashboard traffic
+resource "aws_lb_listener_rule" "opensearch_dashboard" {
+  count        = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
+  listener_arn = aws_lb_listener.public_https.arn
+  priority     = 50
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.opensearch_dashboard_https[0].arn
+  }
+
+  condition {
+    host_header {
+      values = [local.opensearch_dashboard_fqdn]
+    }
+  }
 }
 
 # Listener rule: Forward if Cloudflare header present
@@ -1006,6 +1233,16 @@ resource "cloudflare_dns_record" "www" {
   proxied = true
 }
 
+resource "cloudflare_dns_record" "opensearch_dashboard" {
+  count   = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
+  zone_id = data.cloudflare_zone.main[0].id
+  name    = local.opensearch_dashboard_subdomain
+  content = aws_lb.public_ingress.dns_name
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
 # Cloudflare Transform Rule for header validation (only for prod-spoke)
 resource "cloudflare_ruleset" "transform_add_header" {
   count   = var.enable_cloudflare_restriction && var.domain_name != "" && var.env == "prod-spoke" ? 1 : 0
@@ -1019,7 +1256,7 @@ resource "cloudflare_ruleset" "transform_add_header" {
     description = "Add X-Cloudflare-Zone-Id header for ALB validation"
     expression  = "(http.host eq \"${var.domain_name}\" or http.host eq \"www.${var.domain_name}\" or http.host wildcard \"*.${var.domain_name}\")"
     action      = "rewrite"
-    
+
     action_parameters = {
       headers = {
         "X-Cloudflare-Zone-Id" = {
@@ -1053,6 +1290,20 @@ resource "aws_route53_record" "db" {
   type    = "A"
   ttl     = 300
   records = [aws_instance.databases[0].private_ip]
+}
+
+# DNS Record for OpenSearch Load Balancer (uses existing database private zone)
+resource "aws_route53_record" "opensearch" {
+  count   = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
+  zone_id = aws_route53_zone.db_private[0].zone_id
+  name    = local.opensearch_fqdn
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.opensearch_internal[0].dns_name
+    zone_id                = aws_lb.opensearch_internal[0].zone_id
+    evaluate_target_health = true
+  }
 }
 
 # AWS Backup Vault

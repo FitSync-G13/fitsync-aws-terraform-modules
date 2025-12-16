@@ -173,6 +173,18 @@ variable "db_subdomain_prefix" {
   default     = ""
 }
 
+variable "opensearch_subdomain_prefix" {
+  description = "Subdomain prefix for OpenSearch private DNS (e.g., 'fitsync-search' creates fitsync-search.fitsync.online)"
+  type        = string
+  default     = ""
+}
+
+variable "opensearch_dashboard_subdomain_prefix" {
+  description = "Subdomain prefix for OpenSearch Dashboard public DNS (e.g., 'search-dash' creates search-dash.fitsync.online). If empty, auto-generates from opensearch_subdomain_prefix and subdomain_prefix"
+  type        = string
+  default     = ""
+}
+
 variable "opensearch_master_count" {
   description = "Number of OpenSearch master nodes"
   type        = number

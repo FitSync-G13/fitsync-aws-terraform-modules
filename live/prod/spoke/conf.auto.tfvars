@@ -21,6 +21,8 @@ deployment_environment          = "production"
 domain_name                     = "fitsync.online"
 subdomain_prefix                = "api"
 db_subdomain_prefix             = "db1"
+opensearch_subdomain_prefix     = "opensearch1"
+opensearch_dashboard_subdomain_prefix = "opensearch1-dashboard"
 enable_deletion_protection      = false
 
 # CI Repositories that need ECR access

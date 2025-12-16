@@ -21,6 +21,8 @@ deployment_environment     = "staging"
 domain_name                = "fitsync.online"
 subdomain_prefix           = "stage"
 db_subdomain_prefix        = ""
+opensearch_subdomain_prefix = ""
+opensearch_dashboard_subdomain_prefix = "search-dashboard"
 enable_deletion_protection = false
 
 # CI Repositories that need ECR access

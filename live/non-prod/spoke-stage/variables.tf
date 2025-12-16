@@ -205,6 +205,18 @@ variable "db_subdomain_prefix" {
   default     = ""
 }
 
+variable "opensearch_subdomain_prefix" {
+  description = "Subdomain prefix for OpenSearch private DNS (e.g., 'fitsync-search' creates fitsync-search.fitsync.online)"
+  type        = string
+  default     = ""
+}
+
+variable "opensearch_dashboard_subdomain_prefix" {
+  description = "Subdomain prefix for OpenSearch Dashboard public DNS (e.g., 'search-dash' creates search-dash.fitsync.online). If empty, auto-generates from opensearch_subdomain_prefix and subdomain_prefix"
+  type        = string
+  default     = ""
+}
+
 variable "ci_repositories" {
   description = "List of CI repositories that need ECR access (format: owner/repo-name)"
   type        = list(string)

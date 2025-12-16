@@ -24,7 +24,7 @@ data "aws_internet_gateway" "hub" {
 
 data "aws_route_table" "hub_public" {
   vpc_id = data.aws_vpc.hub.id
-  
+
   filter {
     name   = "route.gateway-id"
     values = [data.aws_internet_gateway.hub.id]
@@ -54,6 +54,6 @@ data "aws_ec2_transit_gateway_vpc_attachment" "hub_attachment" {
 }
 
 data "aws_route_table" "hub_public_subnets" {
-  for_each = toset(data.aws_route_table.hub_public.associations[*].subnet_id)
+  for_each  = toset(data.aws_route_table.hub_public.associations[*].subnet_id)
   subnet_id = each.value
 }

@@ -67,3 +67,33 @@ output "opensearch_subdomain" {
   description = "OpenSearch subdomain FQDN (empty if not configured)"
   value       = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? local.opensearch_fqdn : ""
 }
+
+output "opensearch_private_dns" {
+  description = "Private DNS name for OpenSearch cluster (empty if not configured)"
+  value       = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? local.opensearch_fqdn : ""
+}
+
+output "opensearch_private_zone_id" {
+  description = "Route53 private hosted zone ID for OpenSearch (shared with database)"
+  value       = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? aws_route53_zone.db_private[0].zone_id : ""
+}
+
+output "opensearch_nlb_dns" {
+  description = "DNS name of the OpenSearch internal load balancer (empty if not configured)"
+  value       = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? aws_lb.opensearch_internal[0].dns_name : ""
+}
+
+output "opensearch_ebs_volume_id" {
+  description = "EBS volume ID for OpenSearch storage (for CSI driver)"
+  value       = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? aws_ebs_volume.opensearch_storage[0].id : ""
+}
+
+output "opensearch_availability_zone" {
+  description = "Availability zone of the OpenSearch EBS volume"
+  value       = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? aws_ebs_volume.opensearch_storage[0].availability_zone : ""
+}
+
+output "opensearch_dashboard_fqdn" {
+  description = "Public FQDN for OpenSearch Dashboard (empty if not configured)"
+  value       = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? local.opensearch_dashboard_fqdn : ""
+}
