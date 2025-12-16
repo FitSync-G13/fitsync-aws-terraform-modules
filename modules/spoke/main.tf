@@ -554,7 +554,7 @@ resource "aws_ebs_volume" "opensearch_storage" {
   })
 }
 
-# Internal Load Balancer for OpenSearch
+# Internal Load Balancer for K3s API
 resource "aws_lb" "opensearch_internal" {
   count              = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
   name               = "${var.project_name}-${var.env}-opensearch-nlb"
@@ -606,6 +606,67 @@ resource "aws_lb_target_group_attachment" "opensearch_masters" {
   target_group_arn = aws_lb_target_group.opensearch[0].arn
   target_id        = aws_instance.opensearch_masters[count.index].id
   port             = 6443
+}
+
+# Separate Internal NLB for OpenSearch API (port 9200)
+resource "aws_lb" "opensearch_api_internal" {
+  count              = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  name               = "${var.project_name}-${var.env}-os-api-nlb"
+  internal           = true
+  load_balancer_type = "network"
+  subnets            = aws_subnet.private[*].id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-os-api-nlb"
+  })
+}
+
+resource "aws_lb_target_group" "opensearch_api" {
+  count    = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  name     = "${var.project_name}-${var.env}-os-api-tg"
+  port     = 30920
+  protocol = "TCP"
+  vpc_id   = aws_vpc.spoke.id
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    port                = "traffic-port"
+    protocol            = "TCP"
+    timeout             = 10
+    unhealthy_threshold = 2
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.env}-os-api-tg"
+  })
+}
+
+resource "aws_lb_listener" "opensearch_api" {
+  count             = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  load_balancer_arn = aws_lb.opensearch_api_internal[0].arn
+  port              = "9200"
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.opensearch_api[0].arn
+  }
+}
+
+resource "aws_lb_target_group_attachment" "opensearch_api_masters" {
+  count            = var.opensearch_master_count
+  target_group_arn = aws_lb_target_group.opensearch_api[0].arn
+  target_id        = aws_instance.opensearch_masters[count.index].id
+  port             = 30920
+}
+
+resource "aws_lb_target_group_attachment" "opensearch_api_workers" {
+  count            = var.opensearch_worker_count
+  target_group_arn = aws_lb_target_group.opensearch_api[0].arn
+  target_id        = aws_instance.opensearch_workers[count.index].id
+  port             = 30920
 }
 
 # Network Load Balancer for K3s API
@@ -799,6 +860,14 @@ resource "github_actions_environment_variable" "opensearch_nlb_dns" {
   environment   = github_repository_environment.deployment_env.environment
   variable_name = "OPENSEARCH_NLB_DNS"
   value         = aws_lb.opensearch_internal[0].dns_name
+}
+
+resource "github_actions_environment_variable" "opensearch_api_nlb_dns" {
+  count         = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.deployment_env.environment
+  variable_name = "OPENSEARCH_API_NLB_DNS"
+  value         = aws_lb.opensearch_api_internal[0].dns_name
 }
 
 resource "github_actions_environment_variable" "opensearch_dashboard_fqdn" {
@@ -1008,7 +1077,7 @@ resource "aws_lb_target_group" "opensearch_dashboard_https" {
     enabled             = true
     healthy_threshold   = 2
     interval            = 30
-    matcher             = "200"
+    matcher             = "200,302"
     path                = "/"
     port                = "traffic-port"
     protocol            = "HTTPS"
@@ -1039,49 +1108,7 @@ resource "aws_lb_target_group_attachment" "opensearch_dashboard_https_workers" {
   availability_zone = aws_instance.opensearch_workers[count.index].availability_zone
 }
 
-# Target group for OpenSearch Service HTTPS backend (ALB -> OpenSearch Service HTTPS on 30920)
-resource "aws_lb_target_group" "opensearch_service_https" {
-  count       = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? 1 : 0
-  name        = "${var.project_name}-${var.env}-os-svc-https"
-  port        = 30920
-  protocol    = "HTTPS"
-  vpc_id      = data.aws_vpc.hub.id
-  target_type = "ip"
 
-  health_check {
-    enabled             = true
-    healthy_threshold   = 2
-    interval            = 30
-    matcher             = "200,401"
-    path                = "/"
-    port                = "traffic-port"
-    protocol            = "HTTPS"
-    timeout             = 5
-    unhealthy_threshold = 2
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.env}-opensearch-service-https-tg"
-  })
-}
-
-# Register OpenSearch master private IPs as Service HTTPS targets (cross-VPC via TGW)
-resource "aws_lb_target_group_attachment" "opensearch_service_https_masters" {
-  count             = var.opensearch_master_count
-  target_group_arn  = aws_lb_target_group.opensearch_service_https[0].arn
-  target_id         = aws_instance.opensearch_masters[count.index].private_ip
-  port              = 30920
-  availability_zone = aws_instance.opensearch_masters[count.index].availability_zone
-}
-
-# Register OpenSearch worker private IPs as Service HTTPS targets (cross-VPC via TGW)
-resource "aws_lb_target_group_attachment" "opensearch_service_https_workers" {
-  count             = var.opensearch_worker_count
-  target_group_arn  = aws_lb_target_group.opensearch_service_https[0].arn
-  target_id         = aws_instance.opensearch_workers[count.index].private_ip
-  port              = 30920
-  availability_zone = aws_instance.opensearch_workers[count.index].availability_zone
-}
 
 # HTTP listener - redirect to HTTPS
 resource "aws_lb_listener" "public_http" {
@@ -1119,23 +1146,7 @@ resource "aws_lb_listener" "public_https" {
   depends_on = [aws_acm_certificate_validation.wildcard]
 }
 
-# Listener rule: Forward OpenSearch Service traffic (private access for main cluster)
-resource "aws_lb_listener_rule" "opensearch_service" {
-  count        = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
-  listener_arn = aws_lb_listener.public_https.arn
-  priority     = 40
 
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.opensearch_service_https[0].arn
-  }
-
-  condition {
-    host_header {
-      values = [local.opensearch_fqdn]
-    }
-  }
-}
 
 # Listener rule: Forward OpenSearch Dashboard traffic
 resource "aws_lb_listener_rule" "opensearch_dashboard" {
@@ -1292,7 +1303,7 @@ resource "aws_route53_record" "db" {
   records = [aws_instance.databases[0].private_ip]
 }
 
-# DNS Record for OpenSearch Load Balancer (uses existing database private zone)
+# DNS Record for OpenSearch API NLB (uses existing database private zone)
 resource "aws_route53_record" "opensearch" {
   count   = var.domain_name != "" && (var.opensearch_master_count > 0 || var.opensearch_worker_count > 0) ? 1 : 0
   zone_id = aws_route53_zone.db_private[0].zone_id
@@ -1300,8 +1311,8 @@ resource "aws_route53_record" "opensearch" {
   type    = "A"
 
   alias {
-    name                   = aws_lb.opensearch_internal[0].dns_name
-    zone_id                = aws_lb.opensearch_internal[0].zone_id
+    name                   = aws_lb.opensearch_api_internal[0].dns_name
+    zone_id                = aws_lb.opensearch_api_internal[0].zone_id
     evaluate_target_health = true
   }
 }

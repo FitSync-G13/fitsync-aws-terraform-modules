@@ -79,8 +79,13 @@ output "opensearch_private_zone_id" {
 }
 
 output "opensearch_nlb_dns" {
-  description = "DNS name of the OpenSearch internal load balancer (empty if not configured)"
+  description = "DNS name of the OpenSearch K3s API load balancer (empty if not configured)"
   value       = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? aws_lb.opensearch_internal[0].dns_name : ""
+}
+
+output "opensearch_api_nlb_dns" {
+  description = "DNS name of the OpenSearch API internal load balancer (empty if not configured)"
+  value       = var.opensearch_master_count > 0 || var.opensearch_worker_count > 0 ? aws_lb.opensearch_api_internal[0].dns_name : ""
 }
 
 output "opensearch_ebs_volume_id" {
