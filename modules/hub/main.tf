@@ -98,6 +98,10 @@ resource "aws_instance" "bastion" {
   subnet_id                   = module.vpc.public_subnets[0]
   associate_public_ip_address = true
 
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-bastion"
     Role = "bastion"
@@ -113,14 +117,15 @@ resource "aws_instance" "bastion_protected" {
   subnet_id                   = module.vpc.public_subnets[0]
   associate_public_ip_address = true
 
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [ami]
+  }
+
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-bastion"
     Role = "bastion"
   })
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 # GitHub Actions OIDC Provider

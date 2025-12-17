@@ -451,6 +451,10 @@ resource "aws_instance" "k3s_masters" {
   subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-k3s-master-${count.index + 1}"
     Role = "k3s-master"
@@ -467,6 +471,10 @@ resource "aws_instance" "k3s_workers" {
   subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-k3s-worker-${count.index + 1}"
     Role = "k3s-worker"
@@ -482,6 +490,10 @@ resource "aws_instance" "databases" {
   vpc_security_group_ids = [aws_security_group.cluster.id]
   subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
+  lifecycle {
+    ignore_changes = [ami]
+  }
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-db-${count.index + 1}"
@@ -518,6 +530,10 @@ resource "aws_instance" "opensearch_masters" {
   subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-opensearch-master-${count.index + 1}"
     Role = "opensearch-master"
@@ -533,6 +549,10 @@ resource "aws_instance" "opensearch_workers" {
   vpc_security_group_ids = [aws_security_group.cluster.id]
   subnet_id              = aws_subnet.private[count.index % length(aws_subnet.private)].id
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
+  lifecycle {
+    ignore_changes = [ami]
+  }
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.env}-opensearch-worker-${count.index + 1}"
